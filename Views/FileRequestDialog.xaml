@@ -1,0 +1,56 @@
+<Window x:Class="RemoteDebugServer.ViewModels.FileRequestDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="请求文件" Width="420" Height="320"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#2D2D30" Foreground="#E0E0E0"
+        WindowStyle="ToolWindow">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="从Unity客户端请求文件" FontSize="14" FontWeight="Bold" Margin="0,0,0,12"/>
+
+        <TextBlock Grid.Row="1" Text="文件类型:" Margin="0,4"/>
+        <ComboBox Grid.Row="2" x:Name="FileTypeCombo" Margin="0,0,0,8" Height="28">
+            <ComboBoxItem Content="日志 (log)" Tag="log" IsSelected="True"/>
+            <ComboBoxItem Content="截图 (screenshot)" Tag="screenshot"/>
+            <ComboBoxItem Content="缓存 (cache)" Tag="cache"/>
+            <ComboBoxItem Content="视频帧 (video_frame)" Tag="video_frame"/>
+            <ComboBoxItem Content="其他 (other)" Tag="other"/>
+        </ComboBox>
+
+        <TextBlock Grid.Row="3" Text="文件路径:" Margin="0,4"/>
+        <TextBox Grid.Row="4" x:Name="FilePathBox" Margin="0,0,0,8" Height="28"
+                 Text="Application.persistentDataPath" FontSize="12"/>
+
+        <TextBlock Grid.Row="5" Text="通配符:" Margin="0,4"/>
+        <Grid Grid.Row="6" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="20"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBox x:Name="WildcardBox" Text="*" Height="28"/>
+            <CheckBox Grid.Column="2" x:Name="RecursiveCheck"
+                      Content="递归搜索" VerticalAlignment="Center" Margin="0,0,0,3"/>
+        </Grid>
+
+        <StackPanel Grid.Row="7" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="取消" IsCancel="True" Width="75" Height="28" Margin="0,0,8,0"
+                    Background="#555" Foreground="White" BorderThickness="0"/>
+            <Button Content="请求" IsDefault="True" Width="75" Height="28"
+                    Background="#0078D4" Foreground="White" BorderThickness="0"
+                    Click="Request_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>
