@@ -11,6 +11,7 @@ namespace RemoteDebugServer.Models
     public class ConnectedDevice : INotifyPropertyChanged
     {
         private bool _isConnected;
+        private string _customAlias = "";
 
         public string DeviceId { get; set; } = "";
         public string DeviceName { get; set; } = "";
@@ -20,6 +21,25 @@ namespace RemoteDebugServer.Models
         public DateTime ConnectedTime { get; set; } = DateTime.Now;
         public long StartTime { get; set; }
         public string IpAddress { get; set; } = "";
+
+        /// <summary>
+        /// 用户自定义别名（留空则显示原始设备名）
+        /// setter 会自动触发 AliasChanged 事件，ViewModel 监听并持久化
+        /// </summary>
+        public string Alias
+        {
+            get => string.IsNullOrWhiteSpace(_customAlias) ? DeviceName : _customAlias;
+            set
+            {
+                string trimmed = value?.Trim() ?? "";
+                if (trimmed == DeviceName || string.IsNullOrWhiteSpace(trimmed))
+                    _customAlias = "";
+                else
+                    _customAlias = trimmed;
+                OnPropertyChanged();
+                AliasChanged?.Invoke(this, _customAlias);
+            }
+        }
 
         // 实时日志
         public ObservableCollection<LogDisplayEntry> Logs { get; set; } = new();
@@ -38,8 +58,22 @@ namespace RemoteDebugServer.Models
         }
 
         public string StatusText => IsConnected ? "在线" : "离线";
-        public string DisplayInfo => $"{DeviceName} ({Platform}) - {IpAddress}";
+        public string DisplayInfo => $"{Alias} ({Platform}) - {IpAddress}";
         public string ConnectionDuration => (DateTime.Now - ConnectedTime).ToString(@"hh\:mm\:ss");
+
+        /// <summary>
+        /// 别名变更事件（用于 ViewModel 监听并持久化）
+        /// </summary>
+        public event EventHandler<string>? AliasChanged;
+
+        /// <summary>
+        /// 内部设置别名（不触发事件，用于从文件加载时初始化）
+        /// </summary>
+        public void SetAliasSilently(string alias)
+        {
+            _customAlias = alias?.Trim() ?? "";
+            OnPropertyChanged(nameof(Alias));
+        }
 
         public event PropertyChangedEventHandler? PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string? name = null)

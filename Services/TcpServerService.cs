@@ -220,6 +220,19 @@ namespace RemoteDebugServer.Services
                 };
 
                 session.Device = device;
+
+                // 同一 DeviceId 重新连接时，先踢掉旧会话，避免 UI 出现重复设备
+                if (_sessions.TryGetValue(device.DeviceId, out var oldSession))
+                {
+                    _sessions.TryRemove(device.DeviceId, out _);
+                    if (oldSession.Device != null)
+                    {
+                        oldSession.Device.IsConnected = false;
+                        OnDeviceDisconnected?.Invoke(oldSession.Device);
+                    }
+                    oldSession.Dispose();
+                }
+
                 _sessions[device.DeviceId] = session;
 
                 OnDeviceConnected?.Invoke(device);
@@ -249,7 +262,11 @@ namespace RemoteDebugServer.Services
             {
                 if (session.Device != null)
                 {
-                    _sessions.TryRemove(session.Device.DeviceId, out _);
+                    // 只有当前会话仍然是字典中的活跃会话时才移除，避免旧会话清理误删已重连的新会话
+                    if (_sessions.TryGetValue(session.Device.DeviceId, out var currentSession) && currentSession == session)
+                    {
+                        _sessions.TryRemove(session.Device.DeviceId, out _);
+                    }
                     session.Device.IsConnected = false;
                     OnDeviceDisconnected?.Invoke(session.Device);
                     Log($"设备断开: {session.Device.DeviceName}");
@@ -289,6 +306,10 @@ namespace RemoteDebugServer.Services
                 case MessageType.FileTransfer:
                     await ProcessFileTransfer(device, msg);
                     break;
+
+                case MessageType.Disconnect:
+                    // 客户端主动断开，立即结束当前会话并触发清理
+                    throw new EndOfStreamException("客户端主动断开连接");
             }
         }
 

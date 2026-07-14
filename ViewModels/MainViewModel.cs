@@ -1,3 +1,4 @@
+
 using System;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -10,6 +11,7 @@ using System.Runtime.CompilerServices;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Input;
+using RemoteDebugServer.Helpers;
 using RemoteDebugServer.Models;
 using RemoteDebugServer.Services;
 
@@ -42,6 +44,14 @@ namespace RemoteDebugServer.ViewModels
         public ObservableCollection<ConnectedDevice> Devices { get; } = new();
         public ObservableCollection<LogDisplayEntry> FilteredLogs { get; } = new();
         public ObservableCollection<string> CommandHistory { get; } = new();
+
+        // 日志纯文本显示（绑定到单一 TextBox，支持任意跨行选取）
+        private string _logDisplayText = "";
+        public string LogDisplayText
+        {
+            get => _logDisplayText;
+            set { _logDisplayText = value; OnPropertyChanged(); }
+        }
 
         public bool HasDevices => Devices.Count > 0;
 
@@ -139,6 +149,7 @@ namespace RemoteDebugServer.ViewModels
         public ICommand PingDeviceCommand { get; }
         public ICommand SendFileRequestCommand { get; }
         public ICommand ClearLogsCommand { get; }
+        public ICommand CopyLogsCommand { get; }
         public ICommand OpenFileDirectoryCommand { get; }
 
         public MainViewModel()
@@ -155,6 +166,7 @@ namespace RemoteDebugServer.ViewModels
             PingDeviceCommand = new RelayCommand(async _ => await SendCommand("Ping"), _ => IsDeviceSelected);
             SendFileRequestCommand = new RelayCommand(async _ => await SendFileRequest(), _ => IsDeviceSelected);
             ClearLogsCommand = new RelayCommand(_ => ClearLogs());
+            CopyLogsCommand = new RelayCommand(_ => CopyAllLogs());
             OpenFileDirectoryCommand = new RelayCommand(_ => OpenFileDirectory());
         }
 
@@ -248,8 +260,13 @@ namespace RemoteDebugServer.ViewModels
         {
             FilteredLogs.Clear();
 
-            if (_selectedDevice == null) return;
+            if (_selectedDevice == null)
+            {
+                LogDisplayText = "";
+                return;
+            }
 
+            var sb = new System.Text.StringBuilder();
             foreach (var log in _selectedDevice.Logs)
             {
                 if (!ShouldShowLog(log)) continue;
@@ -259,7 +276,10 @@ namespace RemoteDebugServer.ViewModels
                     continue;
 
                 FilteredLogs.Add(log);
+                sb.AppendLine($"{log.Time:HH:mm:ss.fff} {log.Level} {log.Message}");
             }
+
+            LogDisplayText = sb.ToString();
         }
 
         private bool ShouldShowLog(LogDisplayEntry log)
@@ -281,6 +301,32 @@ namespace RemoteDebugServer.ViewModels
             {
                 _selectedDevice.Logs.Clear();
                 FilteredLogs.Clear();
+                LogDisplayText = "";
+            }
+        }
+
+        private void CopyAllLogs()
+        {
+            if (FilteredLogs.Count == 0)
+            {
+                MessageBox.Show("当前没有日志可复制", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var sb = new System.Text.StringBuilder();
+            foreach (var log in FilteredLogs)
+            {
+                sb.AppendLine($"{log.Time:HH:mm:ss.fff} {log.Level} {log.Message}");
+            }
+
+            try
+            {
+                Clipboard.SetText(sb.ToString());
+                AppendServerLog($"已复制 {FilteredLogs.Count} 条日志到剪贴板");
+            }
+            catch (Exception ex)
+            {
+                AppendServerLog($"复制失败: {ex.Message}");
             }
         }
 
@@ -301,9 +347,21 @@ namespace RemoteDebugServer.ViewModels
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
+                // 从本地文件加载设备别名（主键=机器名 DeviceName，兼容 DeviceId 旧格式）
+                var savedAlias = DeviceAliasStore.Load(device.DeviceId, device.DeviceName);
+                if (!string.IsNullOrEmpty(savedAlias))
+                {
+                    device.SetAliasSilently(savedAlias);
+                }
+                // 监听别名变更，自动持久化
+                device.AliasChanged += (_, alias) =>
+                {
+                    DeviceAliasStore.Save(device.DeviceId, device.DeviceName, alias);
+                };
+
                 Devices.Add(device);
                 OnPropertyChanged(nameof(HasDevices));
-                AppendServerLog($"✓ 设备已连接: {device.DeviceName} ({device.IpAddress})");
+                AppendServerLog($"设备已连接: {device.Alias} ({device.IpAddress})");
             });
         }
 
@@ -317,8 +375,9 @@ namespace RemoteDebugServer.ViewModels
                 {
                     SelectedDevice = null;
                     FilteredLogs.Clear();
+                    LogDisplayText = "";
                 }
-                AppendServerLog($"✗ 设备断开: {device.DeviceName}");
+                AppendServerLog($"✗ 设备断开: {device.Alias}");
             });
         }
 
@@ -331,6 +390,7 @@ namespace RemoteDebugServer.ViewModels
                      log.Message.Contains(_logFilterText, StringComparison.OrdinalIgnoreCase)))
                 {
                     FilteredLogs.Add(log);
+                    LogDisplayText += $"{log.Time:HH:mm:ss.fff} {log.Level} {log.Message}{Environment.NewLine}";
                 }
             });
         }
@@ -339,7 +399,7 @@ namespace RemoteDebugServer.ViewModels
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
-                AppendServerLog($"收到场景树: {device.DeviceName} ({tree.Scenes.Count} 个场景)");
+                AppendServerLog($"收到场景树: {device.Alias} ({tree.Scenes.Count} 个场景)");
             });
         }
 
@@ -348,7 +408,7 @@ namespace RemoteDebugServer.ViewModels
             Application.Current.Dispatcher.Invoke(() =>
             {
                 string status = result.Success ? "成功" : "失败";
-                AppendServerLog($"[指令结果] {device.DeviceName}: {status} - {result.Message}");
+                AppendServerLog($"[指令结果] {device.Alias}: {status} - {result.Message}");
             });
         }
 
@@ -356,7 +416,7 @@ namespace RemoteDebugServer.ViewModels
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
-                AppendServerLog($"[文件] {device.DeviceName}: {Path.GetFileName(filePath)} ({fileType})");
+                AppendServerLog($"[文件] {device.Alias}: {Path.GetFileName(filePath)} ({fileType})");
             });
         }
 
@@ -426,7 +486,10 @@ namespace RemoteDebugServer.ViewModels
 
         public event PropertyChangedEventHandler? PropertyChanged;
         protected void OnPropertyChanged([CallerMemberName] string? name = null)
-            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        {
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        }
+           
 
         #endregion
 
@@ -473,3 +536,4 @@ namespace RemoteDebugServer.ViewModels
         }
     }
 }
+

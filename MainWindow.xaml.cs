@@ -63,8 +63,8 @@ namespace RemoteDebugServer
         private void TabLogs_Checked(object sender, RoutedEventArgs e)
         {
             if (!_initialized) return;
-            if (LogScrollViewer == null || SceneTreePanel == null || CommandsPanel == null) return;
-            LogScrollViewer.Visibility = Visibility.Visible;
+            if (LogTextBox == null || SceneTreePanel == null || CommandsPanel == null) return;
+            LogTextBox.Visibility = Visibility.Visible;
             SceneTreePanel.Visibility = Visibility.Collapsed;
             CommandsPanel.Visibility = Visibility.Collapsed;
         }
@@ -75,8 +75,8 @@ namespace RemoteDebugServer
         private void TabSceneTree_Checked(object sender, RoutedEventArgs e)
         {
             if (!_initialized) return;
-            if (LogScrollViewer == null || SceneTreePanel == null || CommandsPanel == null) return;
-            LogScrollViewer.Visibility = Visibility.Collapsed;
+            if (LogTextBox == null || SceneTreePanel == null || CommandsPanel == null) return;
+            LogTextBox.Visibility = Visibility.Collapsed;
             SceneTreePanel.Visibility = Visibility.Visible;
             CommandsPanel.Visibility = Visibility.Collapsed;
 
@@ -93,8 +93,8 @@ namespace RemoteDebugServer
         private void TabCommands_Checked(object sender, RoutedEventArgs e)
         {
             if (!_initialized) return;
-            if (LogScrollViewer == null || SceneTreePanel == null || CommandsPanel == null) return;
-            LogScrollViewer.Visibility = Visibility.Collapsed;
+            if (LogTextBox == null || SceneTreePanel == null || CommandsPanel == null) return;
+            LogTextBox.Visibility = Visibility.Collapsed;
             SceneTreePanel.Visibility = Visibility.Collapsed;
             CommandsPanel.Visibility = Visibility.Visible;
         }
