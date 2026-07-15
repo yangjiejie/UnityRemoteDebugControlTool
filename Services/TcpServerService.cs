@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Sockets;
 using System.Threading;
@@ -221,16 +222,28 @@ namespace RemoteDebugServer.Services
 
                 session.Device = device;
 
-                // 同一 DeviceId 重新连接时，先踢掉旧会话，避免 UI 出现重复设备
+                // 同一 DeviceId 重新连接时，先踢掉旧会话
                 if (_sessions.TryGetValue(device.DeviceId, out var oldSession))
                 {
                     _sessions.TryRemove(device.DeviceId, out _);
-                    if (oldSession.Device != null)
-                    {
-                        oldSession.Device.IsConnected = false;
-                        OnDeviceDisconnected?.Invoke(oldSession.Device);
-                    }
+                    oldSession.Device.IsConnected = false;
+                    OnDeviceDisconnected?.Invoke(oldSession.Device);
                     oldSession.Dispose();
+                    Log($"清理旧会话 (同 DeviceId): {device.DeviceName}");
+                }
+
+                // 同 DeviceName（机器名）但不同 DeviceId（旧客户端随机 ID），也清理掉
+                // 防止旧客户端随机 GUID 导致出现"幽灵设备"重复断开事件
+                foreach (var kv in _sessions.Where(kv =>
+                    kv.Value.Device != null &&
+                    kv.Value.Device.DeviceName == device.DeviceName &&
+                    kv.Key != device.DeviceId).ToList())
+                {
+                    _sessions.TryRemove(kv.Key, out _);
+                    kv.Value.Device.IsConnected = false;
+                    OnDeviceDisconnected?.Invoke(kv.Value.Device);
+                    kv.Value.Dispose();
+                    Log($"清理旧会话 (同机器名, 旧 DeviceId={kv.Key}): {device.DeviceName}");
                 }
 
                 _sessions[device.DeviceId] = session;
