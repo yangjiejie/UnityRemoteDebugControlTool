@@ -262,7 +262,11 @@ namespace RemoteDebugServer
                 if (_viewModel.SelectedDevice != null)
                 {
                     var param = $"{{\"path\":\"{node.Path}\",\"action\":\"{(node.ActiveSelf ? "disable" : "enable")}\"}}";
-                    await _viewModel.SendCommand("ExecuteCode", param);
+                    var result = await _viewModel.SendCommandAndWaitAsync("ExecuteCode", param);
+                    if (result?.Success == true)
+                    {
+                        await _viewModel.SendCommand("GetSceneTree");
+                    }
                 }
             };
             item.ContextMenu.Items.Add(toggleActive);
@@ -281,7 +285,11 @@ namespace RemoteDebugServer
                     if (result == System.Windows.MessageBoxResult.OK)
                     {
                         var param = $"{{\"path\":\"{node.Path}\",\"action\":\"destroy\"}}";
-                        await _viewModel.SendCommand("ExecuteCode", param);
+                        var cmdResult = await _viewModel.SendCommandAndWaitAsync("ExecuteCode", param);
+                        if (cmdResult?.Success == true)
+                        {
+                            await _viewModel.SendCommand("GetSceneTree");
+                        }
                     }
                 }
             };

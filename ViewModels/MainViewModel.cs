@@ -256,6 +256,7 @@ namespace RemoteDebugServer.ViewModels
             if (_selectedDevice == null) return null;
 
             // 先生成 CommandId 并注册 tcs，再发送命令，避免响应先于注册到达
+            //commonId具有唯一性  客户端执行完毕之后会把guid回传 
             string commandId = Guid.NewGuid().ToString("N");
             var tcs = new TaskCompletionSource<CommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             _pendingCommands[commandId] = tcs;
@@ -271,7 +272,9 @@ namespace RemoteDebugServer.ViewModels
 
             try
             {
-                var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs));
+                //这里tcs虽然是临时变量 但是注册到了_pendingCommands中了，服务器通过
+                //接收处理MainModleView: OnCommandResult 中对缓存的tcs进行trySetResule来通知 
+                var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs)); //异步任务需要考虑超时 
                 if (completed == tcs.Task)
                 {
                     var result = tcs.Task.Result;
@@ -286,6 +289,7 @@ namespace RemoteDebugServer.ViewModels
             }
             finally
             {
+                //消费掉 commonId不然这个容器越来越大 最后会有性能问题
                 _pendingCommands.TryRemove(commandId, out _);
             }
         }
