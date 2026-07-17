@@ -103,16 +103,28 @@ namespace RemoteDebugServer.Services
         /// <summary>
         /// 向指定设备发送指令
         /// </summary>
-        public async Task<bool> SendCommandAsync(string deviceId, string command, string parameters = "")
+        /// <summary>
+        /// 向指定设备发送指令，返回 (是否成功发送, CommandId)
+        /// CommandId 可用于后续匹配 CommandResult 回调
+        /// </summary>
+        public async Task<(bool Success, string CommandId)> SendCommandAsync(string deviceId, string command, string parameters = "")
+        {
+            return await SendCommandAsync(deviceId, command, parameters, Guid.NewGuid().ToString("N"));
+        }
+
+        /// <summary>
+        /// 向指定设备发送指令（使用预设 CommandId，用于先注册回调再发命令，避免竞态）
+        /// </summary>
+        public async Task<(bool Success, string CommandId)> SendCommandAsync(string deviceId, string command, string parameters, string commandId)
         {
             if (!_sessions.TryGetValue(deviceId, out var session) || !session.IsConnected)
-                return false;
+                return (false, "");
 
             try
             {
                 var cmd = new RemoteCommand
                 {
-                    CommandId = Guid.NewGuid().ToString("N"),
+                    CommandId = commandId,
                     Command = command,
                     Parameters = parameters,
                 };
@@ -122,13 +134,13 @@ namespace RemoteDebugServer.Services
                 await session.Stream!.WriteAsync(data);
                 await session.Stream!.FlushAsync();
 
-                Log($"指令已发送 -> {session.Device?.DeviceName}: {command}");
-                return true;
+                Log($"指令已发送 -> {session.Device?.DeviceName}: {command} [{cmd.CommandId[..8]}]");
+                return (true, cmd.CommandId);
             }
             catch (Exception ex)
             {
                 Log($"发送指令失败: {ex.Message}");
-                return false;
+                return (false, "");
             }
         }
 
@@ -161,6 +173,47 @@ namespace RemoteDebugServer.Services
             catch (Exception ex)
             {
                 Log($"请求文件失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 向指定设备推送文件（服务端→客户端，用于热更新等场景）
+        /// </summary>
+        public async Task<bool> SendFileToDeviceAsync(string deviceId, string localFilePath, string relativePath, string fileType)
+        {
+            if (!_sessions.TryGetValue(deviceId, out var session) || !session.IsConnected)
+                return false;
+
+            if (!File.Exists(localFilePath))
+            {
+                Log($"文件不存在: {localFilePath}");
+                return false;
+            }
+
+            try
+            {
+                byte[] fileBytes = await File.ReadAllBytesAsync(localFilePath);
+                var fileData = new FileTransferData
+                {
+                    FileName = Path.GetFileName(localFilePath),
+                    FileSize = fileBytes.Length,
+                    FileData = Convert.ToBase64String(fileBytes),
+                    FileType = fileType,
+                    RelativePath = relativePath,
+                    Description = $"服务端推送: {relativePath}",
+                };
+
+                var msg = MessageCodec.CreateMessage(MessageType.FileTransfer, "", "", fileData);
+                var data = MessageCodec.Encode(msg);
+                await session.Stream!.WriteAsync(data);
+                await session.Stream!.FlushAsync();
+
+                return true;
+            }
+            catch (Exception ex)
+            {
+                Log($"发送文件失败: {ex.Message}");
                 return false;
             }
         }

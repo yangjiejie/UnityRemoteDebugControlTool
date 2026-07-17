@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Globalization;
@@ -10,6 +11,13 @@ using System.Windows.Input;
 using System.Windows.Media;
 using RemoteDebugServer.Models;
 using RemoteDebugServer.ViewModels;
+
+// 消除 System.Windows.Forms / System.Drawing 与 WPF 的命名冲突
+using Clipboard = System.Windows.Clipboard;
+using Color = System.Windows.Media.Color;
+using Colors = System.Windows.Media.Colors;
+using ColorConverter = System.Windows.Media.ColorConverter;
+using MessageBox = System.Windows.MessageBox;
 
 namespace RemoteDebugServer
 {
@@ -25,6 +33,8 @@ namespace RemoteDebugServer
             InitializeComponent();
             _viewModel = new MainViewModel();
             DataContext = _viewModel;
+
+            _viewModel.OnSceneTreeUpdated += ViewModel_OnSceneTreeUpdated;
 
             this.Closing += MainWindow_Closing;
         }
@@ -100,10 +110,27 @@ namespace RemoteDebugServer
         }
 
         /// <summary>
-        /// 渲染场景树到TreeView
+        /// ViewModel 收到新场景树后，若当前正在场景树面板则立即刷新 UI
+        /// </summary>
+        private void ViewModel_OnSceneTreeUpdated(SceneTreeData tree)
+        {
+            Dispatcher.Invoke(() =>
+            {
+                if (SceneTreePanel != null && SceneTreePanel.Visibility == Visibility.Visible)
+                {
+                    RenderSceneTree(tree);
+                }
+            });
+        }
+
+        /// <summary>
+        /// 渲染场景树到TreeView，保持原有展开状态
         /// </summary>
         private void RenderSceneTree(SceneTreeData tree)
         {
+            // 保存当前展开节点的路径
+            var expandedPaths = CollectExpandedPaths(SceneTreeView);
+
             SceneTreeView.Items.Clear();
 
             foreach (var scene in tree.Scenes)
@@ -125,6 +152,69 @@ namespace RemoteDebugServer
                 }
 
                 SceneTreeView.Items.Add(sceneItem);
+            }
+
+            // 恢复展开状态
+            RestoreExpandedPaths(SceneTreeView, expandedPaths);
+        }
+
+        /// <summary>
+        /// 递归收集所有展开节点的路径
+        /// </summary>
+        private static HashSet<string> CollectExpandedPaths(ItemsControl parent)
+        {
+            var paths = new HashSet<string>();
+            foreach (var item in parent.Items)
+            {
+                if (item is TreeViewItem tvi)
+                {
+                    CollectExpandedPathsRecursive(tvi, paths);
+                }
+            }
+            return paths;
+        }
+
+        private static void CollectExpandedPathsRecursive(TreeViewItem item, HashSet<string> paths)
+        {
+            if (item.IsExpanded && item.Tag is SceneTreeNode node)
+            {
+                paths.Add(node.Path);
+            }
+            foreach (var child in item.Items)
+            {
+                if (child is TreeViewItem childTvi)
+                {
+                    CollectExpandedPathsRecursive(childTvi, paths);
+                }
+            }
+        }
+
+        /// <summary>
+        /// 根据保存的路径集合恢复展开状态
+        /// </summary>
+        private static void RestoreExpandedPaths(ItemsControl parent, HashSet<string> paths)
+        {
+            foreach (var item in parent.Items)
+            {
+                if (item is TreeViewItem tvi)
+                {
+                    RestoreExpandedPathsRecursive(tvi, paths);
+                }
+            }
+        }
+
+        private static void RestoreExpandedPathsRecursive(TreeViewItem item, HashSet<string> paths)
+        {
+            if (item.Tag is SceneTreeNode node && paths.Contains(node.Path))
+            {
+                item.IsExpanded = true;
+            }
+            foreach (var child in item.Items)
+            {
+                if (child is TreeViewItem childTvi)
+                {
+                    RestoreExpandedPathsRecursive(childTvi, paths);
+                }
             }
         }
 
@@ -176,6 +266,26 @@ namespace RemoteDebugServer
                 }
             };
             item.ContextMenu.Items.Add(toggleActive);
+
+            item.ContextMenu.Items.Add(new Separator());
+
+            var destroyItem = new MenuItem { Header = "卸载" };
+            destroyItem.Click += async (s, e) =>
+            {
+                if (_viewModel.SelectedDevice != null)
+                {
+                    var result = System.Windows.MessageBox.Show(
+                        $"确定要卸载 \"{node.Name}\" 吗？\n此操作不可撤销！",
+                        "确认卸载", System.Windows.MessageBoxButton.OKCancel,
+                        System.Windows.MessageBoxImage.Warning);
+                    if (result == System.Windows.MessageBoxResult.OK)
+                    {
+                        var param = $"{{\"path\":\"{node.Path}\",\"action\":\"destroy\"}}";
+                        await _viewModel.SendCommand("ExecuteCode", param);
+                    }
+                }
+            };
+            item.ContextMenu.Items.Add(destroyItem);
 
             return item;
         }

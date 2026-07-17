@@ -1,0 +1,72 @@
+<Window x:Class="RemoteDebugServer.ViewModels.HotUpdateDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="触发热更新" Width="520" Height="380"
+        WindowStartupLocation="CenterOwner"
+        ResizeMode="NoResize"
+        Background="#2D2D30" Foreground="#E0E0E0"
+        WindowStyle="ToolWindow">
+    <Grid Margin="15">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <TextBlock Text="选择热更新类型" FontSize="14" FontWeight="Bold" Margin="0,0,0,12"/>
+
+        <StackPanel Grid.Row="1" Margin="0,0,0,12">
+            <RadioButton x:Name="RbAssetBundle" IsChecked="True"
+                         GroupName="HotUpdateType" Margin="0,4" FontSize="13">
+                <StackPanel>
+                    <TextBlock Text="AB 包增量热更新" FontWeight="SemiBold"/>
+                    <TextBlock Text="将服务端文件推送到客户端 persistentData/{platform}/ 目录"
+                               FontSize="11" Foreground="#999" Margin="20,2,0,0"/>
+                </StackPanel>
+            </RadioButton>
+            <RadioButton x:Name="RbPersistentData"
+                         GroupName="HotUpdateType" Margin="0,8,0,4" FontSize="13">
+                <StackPanel>
+                    <TextBlock Text="沙盒持久化目录更新" FontWeight="SemiBold"/>
+                    <TextBlock Text="将服务端文件推送到客户端 persistentData/ 根目录"
+                               FontSize="11" Foreground="#999" Margin="20,2,0,0"/>
+                </StackPanel>
+            </RadioButton>
+        </StackPanel>
+
+        <TextBlock Grid.Row="2" Text="选择源目录（服务端更新文件所在目录）" FontSize="13" FontWeight="SemiBold" Margin="0,8,0,6"/>
+
+        <Grid Grid.Row="3" Margin="0,0,0,10">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <Grid Grid.Row="0" Margin="0,0,0,6">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBox x:Name="TxtSourceDir" Background="#3C3C3C" Foreground="#E0E0E0"
+                         BorderThickness="1" BorderBrush="#555" Padding="6,4"
+                         VerticalAlignment="Center" IsReadOnly="True"/>
+                <Button Grid.Column="1" Content="浏览..." Width="60" Height="26"
+                        Background="#555" Foreground="White" BorderThickness="0"
+                        Click="BrowseSource_Click" Margin="6,0,0,0"/>
+            </Grid>
+            <Border Grid.Row="1" Background="#2A2A1A" CornerRadius="3" Padding="10,8">
+                <TextBlock x:Name="TxtFilePreview" FontSize="11" Foreground="#FFC107"
+                           TextWrapping="Wrap" Text="请先选择源目录"/>
+            </Border>
+        </Grid>
+
+        <StackPanel Grid.Row="4" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="取消" IsCancel="True" Width="75" Height="28" Margin="0,0,8,0"
+                    Background="#555" Foreground="White" BorderThickness="0"/>
+            <Button Content="执行热更新" IsDefault="True" Width="100" Height="28"
+                    Background="#E65100" Foreground="White" BorderThickness="0"
+                    Click="Execute_Click"/>
+        </StackPanel>
+    </Grid>
+</Window>

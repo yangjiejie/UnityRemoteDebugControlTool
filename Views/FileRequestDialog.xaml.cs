@@ -1,6 +1,9 @@
 using System.Windows;
 using System.Windows.Controls;
 
+// 消除 System.Windows.Forms 与 WPF 命名冲突
+using MessageBox = System.Windows.MessageBox;
+
 namespace RemoteDebugServer.ViewModels
 {
     public partial class FileRequestDialog : Window

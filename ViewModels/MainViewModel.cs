@@ -1,5 +1,7 @@
 
+
 using System;
+using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
@@ -15,6 +17,11 @@ using RemoteDebugServer.Helpers;
 using RemoteDebugServer.Models;
 using RemoteDebugServer.Services;
 
+// 消除 System.Windows.Forms 与 WPF 的命名冲突
+using Application = System.Windows.Application;
+using Clipboard = System.Windows.Clipboard;
+using MessageBox = System.Windows.MessageBox;
+
 namespace RemoteDebugServer.ViewModels
 {
     /// <summary>
@@ -23,6 +30,9 @@ namespace RemoteDebugServer.ViewModels
     public class MainViewModel : INotifyPropertyChanged, IDisposable
     {
         private TcpServerService _serverService;
+
+        // 等待客户端指令结果的 TaskCompletionSource，key = CommandId
+        private readonly ConcurrentDictionary<string, TaskCompletionSource<CommandResult>> _pendingCommands = new();
 
         // 绑定属性
         private int _port = 19527;
@@ -148,9 +158,14 @@ namespace RemoteDebugServer.ViewModels
         public ICommand ClearCacheCommand { get; }
         public ICommand PingDeviceCommand { get; }
         public ICommand SendFileRequestCommand { get; }
+        public ICommand RestartGameCommand { get; }
+        public ICommand HotUpdateCommand { get; }
         public ICommand ClearLogsCommand { get; }
         public ICommand CopyLogsCommand { get; }
         public ICommand OpenFileDirectoryCommand { get; }
+
+        // 场景树更新事件（通知 View 刷新 UI）
+        public event Action<SceneTreeData>? OnSceneTreeUpdated;
 
         public MainViewModel()
         {
@@ -165,6 +180,8 @@ namespace RemoteDebugServer.ViewModels
             ClearCacheCommand = new RelayCommand(async _ => await SendCommand("ClearCache"), _ => IsDeviceSelected);
             PingDeviceCommand = new RelayCommand(async _ => await SendCommand("Ping"), _ => IsDeviceSelected);
             SendFileRequestCommand = new RelayCommand(async _ => await SendFileRequest(), _ => IsDeviceSelected);
+            RestartGameCommand = new RelayCommand(async _ => await SendCommand("RestartGame"), _ => IsDeviceSelected);
+            HotUpdateCommand = new RelayCommand(async _ => await TriggerHotUpdate(), _ => IsDeviceSelected);
             ClearLogsCommand = new RelayCommand(_ => ClearLogs());
             CopyLogsCommand = new RelayCommand(_ => CopyAllLogs());
             OpenFileDirectoryCommand = new RelayCommand(_ => OpenFileDirectory());
@@ -217,15 +234,60 @@ namespace RemoteDebugServer.ViewModels
 
         #region 指令发送
 
-        public async Task SendCommand(string command, string parameters = "")
+        public async Task<bool> SendCommand(string command, string parameters = "")
         {
-            if (_selectedDevice == null) return;
+            if (_selectedDevice == null) return false;
 
-            var result = await _serverService.SendCommandAsync(_selectedDevice.DeviceId, command, parameters);
+            var (result, _) = await _serverService.SendCommandAsync(_selectedDevice.DeviceId, command, parameters);
             AppendServerLog(result ? $"指令已发送: {command}" : $"发送失败: {command}");
 
             if (!CommandHistory.Contains(command))
                 CommandHistory.Insert(0, command);
+
+            return result;
+        }
+
+        /// <summary>
+        /// 发送指令并等待客户端返回 CommandResult（带超时）
+        /// 返回 null 表示发送失败或超时
+        /// </summary>
+        public async Task<CommandResult?> SendCommandAndWaitAsync(string command, string parameters = "", int timeoutMs = 10000)
+        {
+            if (_selectedDevice == null) return null;
+
+            // 先生成 CommandId 并注册 tcs，再发送命令，避免响应先于注册到达
+            string commandId = Guid.NewGuid().ToString("N");
+            var tcs = new TaskCompletionSource<CommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingCommands[commandId] = tcs;
+
+            AppendServerLog($"等待客户端响应: {command} [{commandId[..8]}]");
+
+            var (sent, _) = await _serverService.SendCommandAsync(_selectedDevice.DeviceId, command, parameters, commandId);
+            if (!sent)
+            {
+                _pendingCommands.TryRemove(commandId, out _);
+                return null;
+            }
+
+            try
+            {
+                var completed = await Task.WhenAny(tcs.Task, Task.Delay(timeoutMs));
+                if (completed == tcs.Task)
+                {
+                    var result = tcs.Task.Result;
+                    AppendServerLog($"[指令结果] {_selectedDevice.Alias}: {(result.Success ? "成功" : "失败")} - {result.Message}");
+                    return result;
+                }
+                else
+                {
+                    AppendServerLog($"[超时] {command} 等待客户端响应超时 ({timeoutMs}ms)");
+                    return null;
+                }
+            }
+            finally
+            {
+                _pendingCommands.TryRemove(commandId, out _);
+            }
         }
 
         public async Task SendCustomCommand()
@@ -250,6 +312,82 @@ namespace RemoteDebugServer.ViewModels
                         dialog.FileType, dialog.Recursive, dialog.Wildcard);
                 }
             }
+        }
+
+        public async Task TriggerHotUpdate()
+        {
+            if (_selectedDevice == null) return;
+
+            var dialog = new HotUpdateDialog();
+            dialog.Owner = System.Windows.Application.Current.MainWindow;
+            if (dialog.ShowDialog() == true)
+            {
+                string updateType = dialog.SelectedUpdateType;
+                string sourceDir = dialog.SourceDirectory;
+                string fileType = updateType == "PersistentData" ? "hotupdate_persistent" : "hotupdate_ab";
+                string label = updateType == "PersistentData" ? "沙盒全量更新" : "AB包增量更新";
+
+                // 枚举源目录所有文件
+                var files = System.IO.Directory.GetFiles(sourceDir, "*", System.IO.SearchOption.AllDirectories);
+                if (files.Length == 0)
+                {
+                    AppendServerLog($"热更新失败: 源目录为空");
+                    return;
+                }
+
+                AppendServerLog($"开始 {label} -> {_selectedDevice.Alias} ({files.Length} 个文件)");
+
+                // 发送指令通知客户端准备，并等待客户端确认就绪
+                var cmdResult = await SendCommandAndWaitAsync("TriggerHotUpdate",
+                    $"{{\"updateType\":\"{updateType}\"}}");
+                if (cmdResult == null)
+                {
+                    AppendServerLog($"热更新失败: 客户端未响应");
+                    return;
+                }
+                if (!cmdResult.Success)
+                {
+                    AppendServerLog($"热更新失败: 客户端准备失败 - {cmdResult.Message}");
+                    return;
+                }
+
+                // 逐个发送文件
+                int sent = 0;
+                int failed = 0;
+                foreach (var filePath in files)
+                {
+                    string relativePath = GetRelativePath(sourceDir, filePath);
+                    bool ok = await _serverService.SendFileToDeviceAsync(
+                        _selectedDevice.DeviceId, filePath, relativePath, fileType);
+                    if (ok)
+                    {
+                        sent++;
+                        AppendServerLog($"  已发送 ({sent}/{files.Length}): {relativePath}");
+                    }
+                    else
+                    {
+                        failed++;
+                        AppendServerLog($"  发送失败: {relativePath}");
+                    }
+
+                    // 小延迟避免网络拥塞
+                    await Task.Delay(50);
+                }
+
+                AppendServerLog($"热更新完成: 成功 {sent}, 失败 {failed} -> {_selectedDevice.Alias}");
+            }
+        }
+
+        private static string GetRelativePath(string rootDir, string fullPath)
+        {
+            // 统一用 / 分割，兼容跨平台
+            string root = rootDir.Replace('\\', '/').TrimEnd('/');
+            string full = fullPath.Replace('\\', '/');
+
+            if (full.StartsWith(root + "/", StringComparison.OrdinalIgnoreCase))
+                return full.Substring(root.Length + 1);
+
+            return System.IO.Path.GetFileName(full);
         }
 
         #endregion
@@ -359,10 +497,25 @@ namespace RemoteDebugServer.ViewModels
                     DeviceAliasStore.Save(device.DeviceId, device.DeviceName, alias);
                 };
 
-                Devices.Add(device);
+                // 按 ConnectedTime 升序插入，保持列表顺序稳定（防止设备频繁重连时位置跳变）
+                InsertDeviceSorted(device);
                 OnPropertyChanged(nameof(HasDevices));
                 AppendServerLog($"设备已连接: {device.Alias} ({device.IpAddress})");
             });
+        }
+
+        /// <summary>
+        /// 按 ConnectedTime 升序插入设备，保证连接顺序稳定不跳变
+        /// </summary>
+        private void InsertDeviceSorted(ConnectedDevice device)
+        {
+            int index = 0;
+            for (; index < Devices.Count; index++)
+            {
+                if (Devices[index].ConnectedTime > device.ConnectedTime)
+                    break;
+            }
+            Devices.Insert(index, device);
         }
 
         private void OnDeviceDisconnected(ConnectedDevice device)
@@ -400,6 +553,7 @@ namespace RemoteDebugServer.ViewModels
             Application.Current.Dispatcher.Invoke(() =>
             {
                 AppendServerLog($"收到场景树: {device.Alias} ({tree.Scenes.Count} 个场景)");
+                OnSceneTreeUpdated?.Invoke(tree);
             });
         }
 
@@ -407,8 +561,16 @@ namespace RemoteDebugServer.ViewModels
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
-                string status = result.Success ? "成功" : "失败";
-                AppendServerLog($"[指令结果] {device.Alias}: {status} - {result.Message}");
+                // 如果有等待该 CommandId 的 TaskCompletionSource，先触发它
+                if (_pendingCommands.TryRemove(result.CommandId, out var tcs))
+                {
+                    tcs.TrySetResult(result);
+                }
+                else
+                {
+                    string status = result.Success ? "成功" : "失败";
+                    AppendServerLog($"[指令结果] {device.Alias}: {status} - {result.Message}");
+                }
             });
         }
 

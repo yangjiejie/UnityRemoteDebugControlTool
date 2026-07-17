@@ -153,6 +153,7 @@ namespace RemoteDebugServer.Models
         public string FileData { get; set; } = "";
         public string FileType { get; set; } = "";
         public string Description { get; set; } = "";
+        public string RelativePath { get; set; } = ""; // 热更新时：目标目录下的相对路径
     }
 
     public class FileRequestData

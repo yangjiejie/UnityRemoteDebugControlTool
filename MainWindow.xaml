@@ -407,6 +407,12 @@
                                     Style="{StaticResource ActionButton}" Width="75"/>
                             <Button Content="📁 请求文件" Command="{Binding SendFileRequestCommand}"
                                     Style="{StaticResource ActionButton}" Width="80"/>
+                            <Button Content="🔄 重启游戏" Command="{Binding RestartGameCommand}"
+                                    Style="{StaticResource ActionButton}" Width="85"
+                                    Background="#E65100" Foreground="White" BorderThickness="0"/>
+                            <Button Content="🔥 热更新" Command="{Binding HotUpdateCommand}"
+                                    Style="{StaticResource ActionButton}" Width="80"
+                                    Background="#BF360C" Foreground="White" BorderThickness="0"/>
                         </WrapPanel>
 
                         <!-- 自定义指令 -->
