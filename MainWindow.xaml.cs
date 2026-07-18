@@ -49,13 +49,17 @@ namespace RemoteDebugServer
         }
 
         /// <summary>
-        /// 点击设备卡片选择设备
+        /// 点击设备卡片选择/取消选择设备
         /// </summary>
         private void DeviceCard_Click(object sender, MouseButtonEventArgs e)
         {
             if (sender is Border border && border.DataContext is ConnectedDevice device)
             {
-                _viewModel.SelectedDevice = device;
+                // 点击已选中设备 → 取消选中
+                if (_viewModel.SelectedDevice == device)
+                    _viewModel.SelectedDevice = null;
+                else
+                    _viewModel.SelectedDevice = device;
             }
         }
 

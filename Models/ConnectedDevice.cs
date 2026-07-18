@@ -11,6 +11,7 @@ namespace RemoteDebugServer.Models
     public class ConnectedDevice : INotifyPropertyChanged
     {
         private bool _isConnected;
+        private bool _isSelected;
         private string _customAlias = "";
 
         public string DeviceId { get; set; } = "";
@@ -57,6 +58,15 @@ namespace RemoteDebugServer.Models
             set { _isConnected = value; OnPropertyChanged(); OnPropertyChanged(nameof(StatusText)); }
         }
 
+        /// <summary>
+        /// 是否被选中（用于 UI 高亮）
+        /// </summary>
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set { _isSelected = value; OnPropertyChanged(); }
+        }
+
         public string StatusText => IsConnected ? "在线" : "离线";
         public string DisplayInfo => $"{Alias} ({Platform}) - {IpAddress}";
         public string ConnectionDuration => (DateTime.Now - ConnectedTime).ToString(@"hh\:mm\:ss");
@@ -73,6 +83,17 @@ namespace RemoteDebugServer.Models
         {
             _customAlias = alias?.Trim() ?? "";
             OnPropertyChanged(nameof(Alias));
+        }
+
+        /// <summary>
+        /// 重连后通知 UI 刷新可能变化的字段
+        /// </summary>
+        public void NotifyReconnectInfoChanged()
+        {
+            OnPropertyChanged(nameof(ConnectedTime));
+            OnPropertyChanged(nameof(IpAddress));
+            OnPropertyChanged(nameof(DisplayInfo));
+            OnPropertyChanged(nameof(ConnectionDuration));
         }
 
         public event PropertyChangedEventHandler? PropertyChanged;

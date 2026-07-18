@@ -229,6 +229,8 @@ namespace RemoteDebugServer.Services
                     var tcpClient = await _tcpListener!.AcceptTcpClientAsync(ct);
                     tcpClient.NoDelay = true;
                     tcpClient.ReceiveTimeout = 0;
+                    // 启用 TCP keep-alive，防止 NAT/模拟器长时间无数据后断连
+                    tcpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
 
                     var session = new ClientSession(tcpClient);
                     _ = HandleClientAsync(session, ct);
@@ -245,7 +247,7 @@ namespace RemoteDebugServer.Services
         {
             try
             {
-                // 等待第一条消息（注册消息）
+                // 等待第一条消息（注册消息 4个长度消息头+消息体 ）
                 var firstMsg = await MessageCodec.DecodeAsync(session.Stream!, ct);
                 if (firstMsg == null || firstMsg.Type != MessageType.Register.ToString())
                 {
@@ -260,41 +262,53 @@ namespace RemoteDebugServer.Services
                     return;
                 }
 
-                var device = new ConnectedDevice
+                string ipAddress = ((IPEndPoint)session.TcpClient.Client.RemoteEndPoint!).Address.ToString();
+
+                // 同一 DeviceId 重新连接时，复用已有设备对象（避免列表跳跃和选中丢失）
+                ConnectedDevice device;
+                if (_sessions.TryGetValue(registerData.DeviceId, out var oldSession))
                 {
-                    DeviceId = registerData.DeviceId,
-                    DeviceName = registerData.DeviceName,
-                    Platform = registerData.Platform,
-                    AppVersion = registerData.AppVersion,
-                    UnityVersion = registerData.UnityVersion,
-                    StartTime = registerData.StartTime,
-                    ConnectedTime = DateTime.Now,
-                    IpAddress = ((IPEndPoint)session.TcpClient.Client.RemoteEndPoint!).Address.ToString(),
-                    IsConnected = true,
-                };
+                    // 复用旧设备对象，只更新可变字段（位置和选中状态不变）
+                    device = oldSession.Device!;
+                    _sessions.TryRemove(registerData.DeviceId, out _);
+                    oldSession.Dispose();
+
+                    device.Platform = registerData.Platform;
+                    device.AppVersion = registerData.AppVersion;
+                    device.UnityVersion = registerData.UnityVersion;
+                    device.StartTime = registerData.StartTime;
+                    device.IpAddress = ipAddress;
+                    device.ConnectedTime = DateTime.Now;
+                    device.IsConnected = true;
+                    device.NotifyReconnectInfoChanged();
+                    Log($"设备重连 (复用): {device.DeviceName}");
+                }
+                else
+                {
+                    // 新设备首次连接
+                    device = new ConnectedDevice
+                    {
+                        DeviceId = registerData.DeviceId,
+                        DeviceName = registerData.DeviceName,
+                        Platform = registerData.Platform,
+                        AppVersion = registerData.AppVersion,
+                        UnityVersion = registerData.UnityVersion,
+                        StartTime = registerData.StartTime,
+                        ConnectedTime = DateTime.Now,
+                        IpAddress = ipAddress,
+                        IsConnected = true,
+                    };
+                }
 
                 session.Device = device;
 
-                // 同一 DeviceId 重新连接时，先踢掉旧会话
-                if (_sessions.TryGetValue(device.DeviceId, out var oldSession))
-                {
-                    _sessions.TryRemove(device.DeviceId, out _);
-                    oldSession.Device.IsConnected = false;
-                    OnDeviceDisconnected?.Invoke(oldSession.Device);
-                    oldSession.Dispose();
-                    Log($"清理旧会话 (同 DeviceId): {device.DeviceName}");
-                }
-
-                // 同 DeviceName（机器名）但不同 DeviceId（旧客户端随机 ID），也清理掉
-                // 防止旧客户端随机 GUID 导致出现"幽灵设备"重复断开事件
+                // 同 DeviceName（机器名）但不同 DeviceId（旧客户端随机 ID），清理幽灵会话
                 foreach (var kv in _sessions.Where(kv =>
                     kv.Value.Device != null &&
                     kv.Value.Device.DeviceName == device.DeviceName &&
                     kv.Key != device.DeviceId).ToList())
                 {
                     _sessions.TryRemove(kv.Key, out _);
-                    kv.Value.Device.IsConnected = false;
-                    OnDeviceDisconnected?.Invoke(kv.Value.Device);
                     kv.Value.Dispose();
                     Log($"清理旧会话 (同机器名, 旧 DeviceId={kv.Key}): {device.DeviceName}");
                 }
@@ -302,7 +316,7 @@ namespace RemoteDebugServer.Services
                 _sessions[device.DeviceId] = session;
 
                 OnDeviceConnected?.Invoke(device);
-                Log($"设备已连接: {device.DeviceName} [{device.Platform}] {device.UnityVersion} ({device.IpAddress})");
+                Log($"设备已连接: {device.DeviceName} [{device.Platform}] {device.UnityVersion} ({ipAddress})");
 
                 // 接收消息循环
                 while (!ct.IsCancellationRequested && session.IsConnected)
@@ -328,14 +342,15 @@ namespace RemoteDebugServer.Services
             {
                 if (session.Device != null)
                 {
-                    // 只有当前会话仍然是字典中的活跃会话时才移除，避免旧会话清理误删已重连的新会话
+                    // 只有当前会话仍然是字典中的活跃会话时才处理断开，
+                    // 防止旧会话的 finally 块误触发已重连设备的下线事件
                     if (_sessions.TryGetValue(session.Device.DeviceId, out var currentSession) && currentSession == session)
                     {
                         _sessions.TryRemove(session.Device.DeviceId, out _);
+                        session.Device.IsConnected = false;
+                        OnDeviceDisconnected?.Invoke(session.Device);
+                        Log($"设备断开: {session.Device.DeviceName}");
                     }
-                    session.Device.IsConnected = false;
-                    OnDeviceDisconnected?.Invoke(session.Device);
-                    Log($"设备断开: {session.Device.DeviceName}");
                 }
                 session.Dispose();
             }
