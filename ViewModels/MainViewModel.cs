@@ -36,7 +36,7 @@ namespace RemoteDebugServer.ViewModels
 
         // 绑定属性
         private int _port = 19527;
-        private string _bindAddress = "0.0.0.0";
+       
         private string _localIP = GetLocalIPAddress();
         private bool _isServerRunning;
         private string _statusText = "服务器未启动";
@@ -71,18 +71,14 @@ namespace RemoteDebugServer.ViewModels
             set { _port = value; OnPropertyChanged(); }
         }
 
-        public string BindAddress
-        {
-            get => _bindAddress;
-            set { _bindAddress = value; OnPropertyChanged(); }
-        }
+    
 
         public string LocalIP
         {
             get => _localIP;
         }
 
-        public string ConnectionInfo => $"ws://{_localIP}:{_port}";
+     
 
         public bool IsServerRunning
         {
@@ -101,7 +97,15 @@ namespace RemoteDebugServer.ViewModels
         public ConnectedDevice? SelectedDevice
         {
             get => _selectedDevice;
-            set { _selectedDevice = value; OnPropertyChanged(); OnPropertyChanged(nameof(IsDeviceSelected)); UpdateFilteredLogs(); }
+            set 
+            { 
+                if (_selectedDevice != null) _selectedDevice.IsSelected = false;
+                _selectedDevice = value; 
+                if (_selectedDevice != null) _selectedDevice.IsSelected = true;
+                OnPropertyChanged(); 
+                OnPropertyChanged(nameof(IsDeviceSelected)); 
+                UpdateFilteredLogs(); 
+            }
         }
 
         public bool IsDeviceSelected => _selectedDevice != null;
@@ -189,7 +193,7 @@ namespace RemoteDebugServer.ViewModels
 
         private TcpServerService CreateServerService()
         {
-            var svc = new TcpServerService(_port, _bindAddress);
+            var svc = new TcpServerService(_port, LocalIP);
             svc.OnDeviceConnected += OnDeviceConnected;
             svc.OnDeviceDisconnected += OnDeviceDisconnected;
             svc.OnLogReceived += OnLogReceived;
@@ -489,19 +493,24 @@ namespace RemoteDebugServer.ViewModels
         {
             Application.Current.Dispatcher.Invoke(() =>
             {
-                // 从本地文件加载设备别名（主键=机器名 DeviceName，兼容 DeviceId 旧格式）
+                // 重连场景：设备对象已被服务端复用，已经在列表中（不变更位置，不影响选中状态）
+                if (Devices.Contains(device))
+                {
+                    AppendServerLog($"设备重连: {device.Alias} ({device.IpAddress})");
+                    return;
+                }
+
+                // 新设备首次连接
                 var savedAlias = DeviceAliasStore.Load(device.DeviceId, device.DeviceName);
                 if (!string.IsNullOrEmpty(savedAlias))
                 {
                     device.SetAliasSilently(savedAlias);
                 }
-                // 监听别名变更，自动持久化
                 device.AliasChanged += (_, alias) =>
                 {
                     DeviceAliasStore.Save(device.DeviceId, device.DeviceName, alias);
                 };
 
-                // 按 ConnectedTime 升序插入，保持列表顺序稳定（防止设备频繁重连时位置跳变）
                 InsertDeviceSorted(device);
                 OnPropertyChanged(nameof(HasDevices));
                 AppendServerLog($"设备已连接: {device.Alias} ({device.IpAddress})");
