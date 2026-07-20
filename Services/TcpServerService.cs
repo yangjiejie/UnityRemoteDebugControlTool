@@ -310,6 +310,15 @@ namespace RemoteDebugServer.Services
                 {
                     _sessions.TryRemove(kv.Key, out _);
                     kv.Value.Dispose();
+                    // 关键修复：必须通知上层把旧设备从左侧列表移除，
+                    // 否则旧对象会残留在 Devices 中，而新连接又加入一个对象，
+                    // 导致同一设备（同机器名）在列表中重复出现。
+                    // 此处旧会话的 DeviceId 已从 _sessions 移除，其 finally 块
+                    // 不会再触发断开事件，因此不会重复通知。
+                    if (kv.Value.Device != null)
+                    {
+                        OnDeviceDisconnected?.Invoke(kv.Value.Device);
+                    }
                     Log($"清理旧会话 (同机器名, 旧 DeviceId={kv.Key}): {device.DeviceName}");
                 }
 
