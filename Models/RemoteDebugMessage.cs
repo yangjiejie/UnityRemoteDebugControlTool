@@ -22,6 +22,7 @@ namespace RemoteDebugServer.Models
         FileTransfer,
         FileRequest,
         Disconnect,
+        MockProtocol,        // 模拟游戏服务器下发的 SC 协议
     }
 
     #endregion
@@ -58,6 +59,8 @@ namespace RemoteDebugServer.Models
         public string Platform { get; set; } = "";
         public string AppVersion { get; set; } = "";
         public string UnityVersion { get; set; } = "";
+        /// <summary>资源热更新版本号，对应客户端 remoteConfig.version（JSON 键 hotUpdateVersion）。</summary>
+        public string HotUpdateVersion { get; set; } = "";
         public long StartTime { get; set; }
     }
 
@@ -162,6 +165,22 @@ namespace RemoteDebugServer.Models
         public string FileType { get; set; } = "";
         public bool Recursive { get; set; }
         public string Wildcard { get; set; } = "";
+    }
+
+    #endregion
+
+    #region 模拟协议（模拟游戏服务器下发）
+
+    /// <summary>
+    /// 模拟游戏服务器下发的 SC 协议数据。
+    /// MsgId 为 SC 协议号；Data 为 Base64 编码的 protobuf 字节。
+    /// 注意：服务端直接将 protobuf 字节交给客户端，由客户端注入 NetEvent.OnLuaMessage，
+    /// 因此工具侧无需再做游戏网络层的加密/分包。
+    /// </summary>
+    public class MockProtocolData
+    {
+        public short MsgId { get; set; }
+        public string Data { get; set; } = "";
     }
 
     #endregion

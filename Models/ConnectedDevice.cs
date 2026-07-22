@@ -19,6 +19,8 @@ namespace RemoteDebugServer.Models
         public string Platform { get; set; } = "";
         public string AppVersion { get; set; } = "";
         public string UnityVersion { get; set; } = "";
+        /// <summary>资源热更新版本号（客户端 remoteConfig.version）。</summary>
+        public string HotUpdateVersion { get; set; } = "";
         public DateTime ConnectedTime { get; set; } = DateTime.Now;
         public long StartTime { get; set; }
         public string IpAddress { get; set; } = "";
@@ -92,6 +94,7 @@ namespace RemoteDebugServer.Models
         {
             OnPropertyChanged(nameof(ConnectedTime));
             OnPropertyChanged(nameof(IpAddress));
+            OnPropertyChanged(nameof(HotUpdateVersion));
             OnPropertyChanged(nameof(DisplayInfo));
             OnPropertyChanged(nameof(ConnectionDuration));
         }

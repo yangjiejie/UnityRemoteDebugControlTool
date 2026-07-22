@@ -1,6 +1,7 @@
 
 
 using System;
+using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -38,6 +39,7 @@ namespace RemoteDebugServer.ViewModels
         private int _port = 19527;
        
         private string _localIP = GetLocalIPAddress();
+        private string _appVersion = GetAppVersion();
         private bool _isServerRunning;
         private string _statusText = "服务器未启动";
         private ConnectedDevice? _selectedDevice;
@@ -50,9 +52,10 @@ namespace RemoteDebugServer.ViewModels
         private bool _showWarnings = true;
         private bool _showErrors = true;
         private string _logFilterText = "";
+        private bool _logViewActive; // 日志页是否可见，仅在可见时才重建/更新日志文本框
 
         public ObservableCollection<ConnectedDevice> Devices { get; } = new();
-        public ObservableCollection<LogDisplayEntry> FilteredLogs { get; } = new();
+        public List<LogDisplayEntry> FilteredLogs { get; } = new();
         public ObservableCollection<string> CommandHistory { get; } = new();
 
         // 日志纯文本显示（绑定到单一 TextBox，支持任意跨行选取）
@@ -76,6 +79,12 @@ namespace RemoteDebugServer.ViewModels
         public string LocalIP
         {
             get => _localIP;
+        }
+
+        /// <summary>本工具自身的版本（对应 Unity 的 Application.version，取自程序集信息版本）。</summary>
+        public string AppVersion
+        {
+            get => _appVersion;
         }
 
      
@@ -152,6 +161,22 @@ namespace RemoteDebugServer.ViewModels
             set { _logFilterText = value; OnPropertyChanged(); UpdateFilteredLogs(); }
         }
 
+        /// <summary>
+        /// 日志页是否可见。进入日志页时立即按需重建日志文本，离开后停止更新，
+        /// 避免在非日志页选中设备或实时收日志时仍反复拼接大字符串并重排文本框。
+        /// </summary>
+        public bool LogViewActive
+        {
+            get => _logViewActive;
+            set
+            {
+                if (_logViewActive == value) return;
+                _logViewActive = value;
+                OnPropertyChanged();
+                if (_logViewActive) UpdateFilteredLogs();
+            }
+        }
+
         // 指令
         public ICommand StartServerCommand { get; }
         public ICommand StopServerCommand { get; }
@@ -165,6 +190,7 @@ namespace RemoteDebugServer.ViewModels
         public ICommand RestartGameCommand { get; }
         public ICommand HotUpdateCommand { get; }
         public ICommand ClearLogsCommand { get; }
+        public ICommand ClearServerLogCommand { get; }
         public ICommand CopyLogsCommand { get; }
         public ICommand OpenFileDirectoryCommand { get; }
 
@@ -187,6 +213,7 @@ namespace RemoteDebugServer.ViewModels
             RestartGameCommand = new RelayCommand(async _ => await SendCommand("RestartGame"), _ => IsDeviceSelected);
             HotUpdateCommand = new RelayCommand(async _ => await TriggerHotUpdate(), _ => IsDeviceSelected);
             ClearLogsCommand = new RelayCommand(_ => ClearLogs());
+            ClearServerLogCommand = new RelayCommand(_ => ClearServerLog());
             CopyLogsCommand = new RelayCommand(_ => CopyAllLogs());
             OpenFileDirectoryCommand = new RelayCommand(_ => OpenFileDirectory());
         }
@@ -306,6 +333,15 @@ namespace RemoteDebugServer.ViewModels
             CommandParameters = "";
         }
 
+        /// <summary>
+        /// 模拟游戏服务器向设备下发 SC 协议（委托给当前 TcpServerService 实例）。
+        /// </summary>
+        public Task<(bool, string)> SendMockProtocolAsync(string deviceId, short msgId, byte[] bytes)
+        {
+            if (_serverService == null) return Task.FromResult<(bool, string)>((false, "服务未启动"));
+            return _serverService.SendMockProtocolAsync(deviceId, msgId, bytes);
+        }
+
         public async Task SendFileRequest()
         {
             if (_selectedDevice == null) return;
@@ -408,7 +444,7 @@ namespace RemoteDebugServer.ViewModels
 
             if (_selectedDevice == null)
             {
-                LogDisplayText = "";
+                if (_logViewActive) LogDisplayText = "";
                 return;
             }
 
@@ -422,10 +458,12 @@ namespace RemoteDebugServer.ViewModels
                     continue;
 
                 FilteredLogs.Add(log);
-                sb.AppendLine($"{log.Time:HH:mm:ss.fff} {log.Level} {log.Message}");
+                if (_logViewActive)
+                    sb.AppendLine($"{log.Time:HH:mm:ss.fff} {log.Level} {log.Message}");
             }
 
-            LogDisplayText = sb.ToString();
+            if (_logViewActive)
+                LogDisplayText = sb.ToString();
         }
 
         private bool ShouldShowLog(LogDisplayEntry log)
@@ -447,8 +485,13 @@ namespace RemoteDebugServer.ViewModels
             {
                 _selectedDevice.Logs.Clear();
                 FilteredLogs.Clear();
-                LogDisplayText = "";
+                if (_logViewActive) LogDisplayText = "";
             }
+        }
+
+        private void ClearServerLog()
+        {
+            ServerLogText = "";
         }
 
         private void CopyAllLogs()
@@ -540,8 +583,6 @@ namespace RemoteDebugServer.ViewModels
                 if (_selectedDevice == device)
                 {
                     SelectedDevice = null;
-                    FilteredLogs.Clear();
-                    LogDisplayText = "";
                 }
                 AppendServerLog($"✗ 设备断开: {device.Alias}");
             });
@@ -556,7 +597,8 @@ namespace RemoteDebugServer.ViewModels
                      log.Message.Contains(_logFilterText, StringComparison.OrdinalIgnoreCase)))
                 {
                     FilteredLogs.Add(log);
-                    LogDisplayText += $"{log.Time:HH:mm:ss.fff} {log.Level} {log.Message}{Environment.NewLine}";
+                    if (_logViewActive)
+                        LogDisplayText += $"{log.Time:HH:mm:ss.fff} {log.Level} {log.Message}{Environment.NewLine}";
                 }
             });
         }
@@ -653,6 +695,31 @@ namespace RemoteDebugServer.ViewModels
             catch { }
 
             return "127.0.0.1";
+        }
+
+        /// <summary>
+        /// 读取程序集信息版本（对应 Unity 的 Application.version）。
+        /// 需要在 csproj 中设置 &lt;Version&gt; 或 &lt;InformationalVersion&gt;，否则回退为 "1.0.0"。
+        /// </summary>
+        public static string GetAppVersion()
+        {
+            try
+            {
+                var asm = System.Reflection.Assembly.GetExecutingAssembly();
+                var info = System.Reflection.CustomAttributeData.GetCustomAttributes(asm)
+                    .FirstOrDefault(a => a.AttributeType.Name == "AssemblyInformationalVersionAttribute");
+                if (info != null && info.ConstructorArguments.Count > 0)
+                {
+                    var v = info.ConstructorArguments[0].Value?.ToString();
+                    if (!string.IsNullOrWhiteSpace(v))
+                        return v!;
+                }
+                var ver = asm.GetName().Version;
+                if (ver != null)
+                    return ver.ToString();
+            }
+            catch { }
+            return "1.0.0";
         }
 
         #endregion

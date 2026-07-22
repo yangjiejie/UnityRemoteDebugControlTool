@@ -27,12 +27,16 @@ namespace RemoteDebugServer
     public partial class MainWindow : Window
     {
         private readonly MainViewModel _viewModel;
+        private readonly MockServerViewModel _mockViewModel;
 
         public MainWindow()
         {
             InitializeComponent();
             _viewModel = new MainViewModel();
             DataContext = _viewModel;
+
+            _mockViewModel = new MockServerViewModel(_viewModel);
+            MockServerView.DataContext = _mockViewModel;
 
             _viewModel.OnSceneTreeUpdated += ViewModel_OnSceneTreeUpdated;
 
@@ -45,6 +49,7 @@ namespace RemoteDebugServer
             {
                 await _viewModel.StopServer();
             }
+            _mockViewModel.SaveSentRequestsNow();
             _viewModel.Dispose();
         }
 
@@ -69,6 +74,8 @@ namespace RemoteDebugServer
         {
             base.OnContentRendered(e);
             _initialized = true;
+            // 默认 Tab 为日志页，激活日志视图刷新（默认 RadioButton 的 Checked 事件被 _initialized 守卫挡掉了）
+            _viewModel.LogViewActive = TabLogs != null && TabLogs.IsChecked == true;
         }
 
         /// <summary>
@@ -77,10 +84,12 @@ namespace RemoteDebugServer
         private void TabLogs_Checked(object sender, RoutedEventArgs e)
         {
             if (!_initialized) return;
-            if (LogTextBox == null || SceneTreePanel == null || CommandsPanel == null) return;
+            if (LogTextBox == null || SceneTreePanel == null || CommandsPanel == null || MockPanel == null) return;
             LogTextBox.Visibility = Visibility.Visible;
             SceneTreePanel.Visibility = Visibility.Collapsed;
             CommandsPanel.Visibility = Visibility.Collapsed;
+            MockPanel.Visibility = Visibility.Collapsed;
+            _viewModel.LogViewActive = true;
         }
 
         /// <summary>
@@ -89,10 +98,12 @@ namespace RemoteDebugServer
         private void TabSceneTree_Checked(object sender, RoutedEventArgs e)
         {
             if (!_initialized) return;
-            if (LogTextBox == null || SceneTreePanel == null || CommandsPanel == null) return;
+            if (LogTextBox == null || SceneTreePanel == null || CommandsPanel == null || MockPanel == null) return;
             LogTextBox.Visibility = Visibility.Collapsed;
             SceneTreePanel.Visibility = Visibility.Visible;
             CommandsPanel.Visibility = Visibility.Collapsed;
+            MockPanel.Visibility = Visibility.Collapsed;
+            _viewModel.LogViewActive = false;
 
             // 刷新场景树
             if (_viewModel.SelectedDevice?.SceneTree != null)
@@ -107,10 +118,26 @@ namespace RemoteDebugServer
         private void TabCommands_Checked(object sender, RoutedEventArgs e)
         {
             if (!_initialized) return;
-            if (LogTextBox == null || SceneTreePanel == null || CommandsPanel == null) return;
+            if (LogTextBox == null || SceneTreePanel == null || CommandsPanel == null || MockPanel == null) return;
             LogTextBox.Visibility = Visibility.Collapsed;
             SceneTreePanel.Visibility = Visibility.Collapsed;
             CommandsPanel.Visibility = Visibility.Visible;
+            MockPanel.Visibility = Visibility.Collapsed;
+            _viewModel.LogViewActive = false;
+        }
+
+        /// <summary>
+        /// 模拟发包Tab切换
+        /// </summary>
+        private void TabMock_Checked(object sender, RoutedEventArgs e)
+        {
+            if (!_initialized) return;
+            if (LogTextBox == null || SceneTreePanel == null || CommandsPanel == null || MockPanel == null) return;
+            LogTextBox.Visibility = Visibility.Collapsed;
+            SceneTreePanel.Visibility = Visibility.Collapsed;
+            CommandsPanel.Visibility = Visibility.Collapsed;
+            MockPanel.Visibility = Visibility.Visible;
+            _viewModel.LogViewActive = false;
         }
 
         /// <summary>

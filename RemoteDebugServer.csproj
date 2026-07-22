@@ -7,11 +7,17 @@
     <UseWindowsForms>true</UseWindowsForms>
     <RootNamespace>RemoteDebugServer</RootNamespace>
     <AssemblyName>RemoteDebugServer</AssemblyName>
+    <Version>1.0.0</Version>
     <ApplicationIcon />
     <StartupObject>RemoteDebugServer.App</StartupObject>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!-- 模拟游戏服务器发包所用的 protobuf 协议类（HotFix.Ctrl）依赖此包 -->
+    <PackageReference Include="Google.Protobuf" Version="3.28.3" />
+  </ItemGroup>
 
 </Project>

@@ -145,6 +145,36 @@ namespace RemoteDebugServer.Services
         }
 
         /// <summary>
+        /// 模拟游戏服务器向指定设备下发一条 SC 协议。
+        /// protobuf 字节由客户端直接注入 NetEvent.OnLuaMessage，故此处只负责透传。
+        /// </summary>
+        public async Task<(bool Success, string Error)> SendMockProtocolAsync(string deviceId, short msgId, byte[] protobufBytes)
+        {
+            if (!_sessions.TryGetValue(deviceId, out var session) || !session.IsConnected)
+                return (false, "设备未连接");
+
+            try
+            {
+                var data = new MockProtocolData
+                {
+                    MsgId = msgId,
+                    Data = Convert.ToBase64String(protobufBytes),
+                };
+                var msg = MessageCodec.CreateMessage(MessageType.MockProtocol, "", "", data);
+                var bytes = MessageCodec.Encode(msg);
+                await session.Stream!.WriteAsync(bytes);
+                await session.Stream!.FlushAsync();
+                Log($"模拟协议已发送 -> {session.Device?.DeviceName}: msgId={msgId} ({protobufBytes.Length} 字节)");
+                return (true, "");
+            }
+            catch (Exception ex)
+            {
+                Log($"发送模拟协议失败: {ex.Message}");
+                return (false, ex.Message);
+            }
+        }
+
+        /// <summary>
         /// 向指定设备请求文件
         /// </summary>
         public async Task<bool> RequestFileAsync(string deviceId, string filePath, string fileType, bool recursive = false, string wildcard = "*")
@@ -276,6 +306,7 @@ namespace RemoteDebugServer.Services
                     device.Platform = registerData.Platform;
                     device.AppVersion = registerData.AppVersion;
                     device.UnityVersion = registerData.UnityVersion;
+                    device.HotUpdateVersion = registerData.HotUpdateVersion;
                     device.StartTime = registerData.StartTime;
                     device.IpAddress = ipAddress;
                     device.ConnectedTime = DateTime.Now;
@@ -293,6 +324,7 @@ namespace RemoteDebugServer.Services
                         Platform = registerData.Platform,
                         AppVersion = registerData.AppVersion,
                         UnityVersion = registerData.UnityVersion,
+                        HotUpdateVersion = registerData.HotUpdateVersion,
                         StartTime = registerData.StartTime,
                         ConnectedTime = DateTime.Now,
                         IpAddress = ipAddress,
@@ -325,7 +357,7 @@ namespace RemoteDebugServer.Services
                 _sessions[device.DeviceId] = session;
 
                 OnDeviceConnected?.Invoke(device);
-                Log($"设备已连接: {device.DeviceName} [{device.Platform}] {device.UnityVersion} ({ipAddress})");
+                Log($"设备已连接: {device.DeviceName} [{device.Platform}] Unity {device.UnityVersion} App {device.AppVersion} 资源 {device.HotUpdateVersion} ({ipAddress})");
 
                 // 接收消息循环
                 while (!ct.IsCancellationRequested && session.IsConnected)
