@@ -39,6 +39,7 @@ namespace RemoteDebugServer
             MockServerView.DataContext = _mockViewModel;
 
             _viewModel.OnSceneTreeUpdated += ViewModel_OnSceneTreeUpdated;
+            _viewModel.PropertyChanged += ViewModel_PropertyChanged;
 
             this.Closing += MainWindow_Closing;
         }
@@ -138,6 +139,26 @@ namespace RemoteDebugServer
             CommandsPanel.Visibility = Visibility.Collapsed;
             MockPanel.Visibility = Visibility.Visible;
             _viewModel.LogViewActive = false;
+        }
+
+        /// <summary>
+        /// 监听 ViewModel 属性变化：切换左侧设备时清空场景树，
+        /// 避免残留上一个设备的树（新设备尚未拉取场景树时尤其明显）。
+        /// </summary>
+        private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+        {
+            if (e.PropertyName != nameof(MainViewModel.SelectedDevice)) return;
+
+            // 切换设备：无论是否正在场景树页，先把旧设备的树清掉
+            if (SceneTreeView != null)
+                SceneTreeView.Items.Clear();
+
+            // 若当前正处于场景树页，且新选中的设备已缓存场景树，则立即渲染
+            if (SceneTreePanel?.Visibility == Visibility.Visible &&
+                _viewModel.SelectedDevice?.SceneTree != null)
+            {
+                RenderSceneTree(_viewModel.SelectedDevice.SceneTree);
+            }
         }
 
         /// <summary>

@@ -366,16 +366,28 @@ namespace RemoteDebugServer.ViewModels
             dialog.Owner = System.Windows.Application.Current.MainWindow;
             if (dialog.ShowDialog() == true)
             {
-                string updateType = dialog.SelectedUpdateType;
-                string sourceDir = dialog.SourceDirectory;
-                string fileType = updateType == "PersistentData" ? "hotupdate_persistent" : "hotupdate_ab";
-                string label = updateType == "PersistentData" ? "沙盒全量更新" : "AB包增量更新";
+                string updateType = dialog.UpdateType; // assetbundle / persistent / loose
+                // 散文件与持久化目录都写入持久化根目录；只有 AB 模式写入 platform 子目录
+                string fileType = updateType == "assetbundle" ? "hotupdate_ab" : "hotupdate_persistent";
+                string label = updateType == "persistent" ? "沙盒全量更新"
+                              : updateType == "loose" ? "热更散文件" : "AB包增量更新";
 
-                // 枚举源目录所有文件
-                var files = System.IO.Directory.GetFiles(sourceDir, "*", System.IO.SearchOption.AllDirectories);
+                // 散文件模式：直接使用对话框中选中的多个文件
+                string[] files;
+                string sourceDir = "";
+                if (updateType == "loose")
+                {
+                    files = dialog.LooseFiles.ToArray();
+                }
+                else
+                {
+                    sourceDir = dialog.SourceDirectory;
+                    files = System.IO.Directory.GetFiles(sourceDir, "*", System.IO.SearchOption.AllDirectories);
+                }
+
                 if (files.Length == 0)
                 {
-                    AppendServerLog($"热更新失败: 源目录为空");
+                    AppendServerLog($"热更新失败: 未选择任何文件");
                     return;
                 }
 
@@ -400,7 +412,10 @@ namespace RemoteDebugServer.ViewModels
                 int failed = 0;
                 foreach (var filePath in files)
                 {
-                    string relativePath = GetRelativePath(sourceDir, filePath);
+                    // 散文件模式：直接以文件名写入持久化根目录（不保留子目录）
+                    string relativePath = updateType == "loose"
+                        ? System.IO.Path.GetFileName(filePath)
+                        : GetRelativePath(sourceDir, filePath);
                     bool ok = await _serverService.SendFileToDeviceAsync(
                         _selectedDevice.DeviceId, filePath, relativePath, fileType);
                     if (ok)
