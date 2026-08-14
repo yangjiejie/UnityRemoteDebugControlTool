@@ -1,7 +1,10 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Windows;
 using System.Windows.Controls;
 using Microsoft.Win32;
@@ -12,9 +15,9 @@ namespace RemoteDebugServer.ViewModels
     /// 触发热更新对话框。支持三种模式：
     /// - AB 包增量热更新（源目录 -> persistentData/{platform}）
     /// - 沙盒持久化目录更新（源目录 -> persistentData 根目录）
-    /// - 热更散文件（多选文件 -> persistentData 根目录，按文件名）
+    /// - 热更散文件/文件夹（批量多选 -> persistentData 根目录，按文件名）
     /// </summary>
-    public partial class HotUpdateDialog : Window
+    public partial class HotUpdateDialog : Window, INotifyPropertyChanged
     {
         /// <summary>更新类型：assetbundle / persistent / loose</summary>
         public string UpdateType { get; private set; } = "assetbundle";
@@ -22,15 +25,54 @@ namespace RemoteDebugServer.ViewModels
         /// <summary>源目录（assetbundle / persistent 模式）</summary>
         public string SourceDirectory { get; private set; } = "";
 
-        /// <summary>散文件模式选中的多个文件（完整路径）</summary>
-        public List<string> LooseFiles { get; private set; } = new List<string>();
+        /// <summary>散文件模式下选中的文件/文件夹条目（完整路径）</summary>
+        public ObservableCollection<string> LooseEntries { get; } = new ObservableCollection<string>();
+
+        /// <summary>散文件模式下展开后的所有文件路径（文件夹会被递归展开，自动去重）</summary>
+        public IReadOnlyList<string> ExpandedFiles
+        {
+            get
+            {
+                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var entry in LooseEntries)
+                {
+                    if (File.Exists(entry))
+                        set.Add(entry);
+                    else if (Directory.Exists(entry))
+                    {
+                        foreach (var file in Directory.GetFiles(entry, "*", SearchOption.AllDirectories))
+                            set.Add(file);
+                    }
+                }
+                return set.ToList();
+            }
+        }
 
         public HotUpdateDialog()
         {
             InitializeComponent();
+            DataContext = this;
+            LstLooseEntries.ItemsSource = LooseEntries;
+            LooseEntries.CollectionChanged += (_, _) => RefreshLoosePreview();
+            RbAssetBundle.Checked += (_, _) => UpdateMode();
+            RbPersistentData.Checked += (_, _) => UpdateMode();
+            RbLoose.Checked += (_, _) => UpdateMode();
         }
 
-        private bool IsLooseChecked => RbLoose.IsChecked == true;
+        public bool IsLooseChecked => RbLoose.IsChecked == true;
+        public Visibility SourcePreviewVisibility => IsLooseChecked ? Visibility.Collapsed : Visibility.Visible;
+        public Visibility LooseVisibility => IsLooseChecked ? Visibility.Visible : Visibility.Collapsed;
+
+        public event PropertyChangedEventHandler? PropertyChanged;
+        private void OnPropertyChanged([CallerMemberName] string? name = null)
+            => PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+
+        private void UpdateMode()
+        {
+            OnPropertyChanged(nameof(IsLooseChecked));
+            OnPropertyChanged(nameof(SourcePreviewVisibility));
+            OnPropertyChanged(nameof(LooseVisibility));
+        }
 
         private void BrowseSource_Click(object sender, RoutedEventArgs e)
         {
@@ -47,7 +89,7 @@ namespace RemoteDebugServer.ViewModels
             }
         }
 
-        private void SelectLooseFiles_Click(object sender, RoutedEventArgs e)
+        private void AddLooseFiles_Click(object sender, RoutedEventArgs e)
         {
             var dlg = new Microsoft.Win32.OpenFileDialog
             {
@@ -58,12 +100,33 @@ namespace RemoteDebugServer.ViewModels
             };
             if (dlg.ShowDialog() == true)
             {
-                LooseFiles = dlg.FileNames.ToList();
-                TxtLooseFiles.Text = LooseFiles.Count == 1
-                    ? Path.GetFileName(LooseFiles[0])
-                    : $"已选 {LooseFiles.Count} 个文件";
-                RefreshLoosePreview();
+                foreach (var file in dlg.FileNames)
+                {
+                    if (!LooseEntries.Contains(file, StringComparer.OrdinalIgnoreCase))
+                        LooseEntries.Add(file);
+                }
             }
+        }
+
+        private void AddLooseFolder_Click(object sender, RoutedEventArgs e)
+        {
+            using var dlg = new System.Windows.Forms.FolderBrowserDialog
+            {
+                Description = "选择热更散文件夹（会递归推送该文件夹下所有文件）",
+                ShowNewFolderButton = false,
+            };
+            if (dlg.ShowDialog() == System.Windows.Forms.DialogResult.OK)
+            {
+                if (!LooseEntries.Contains(dlg.SelectedPath, StringComparer.OrdinalIgnoreCase))
+                    LooseEntries.Add(dlg.SelectedPath);
+            }
+        }
+
+        private void RemoveLooseSelected_Click(object sender, RoutedEventArgs e)
+        {
+            var selected = LstLooseEntries.SelectedItems.Cast<string>().ToList();
+            foreach (var item in selected)
+                LooseEntries.Remove(item);
         }
 
         private void RefreshDirPreview()
@@ -86,14 +149,17 @@ namespace RemoteDebugServer.ViewModels
 
         private void RefreshLoosePreview()
         {
-            if (LooseFiles.Count == 0)
+            if (LooseEntries.Count == 0)
             {
-                TxtLoosePreview.Text = "散文件模式将逐个以文件名写入持久化根目录（不保留子目录）。";
+                TxtLoosePreview.Text = "散文件模式将逐个以文件名写入持久化根目录（不保留子目录）。\n点击“添加文件…”或“添加文件夹…”批量选择。";
                 return;
             }
-            var lines = LooseFiles.Select(Path.GetFileName).ToList();
-            TxtLoosePreview.Text = $"共 {LooseFiles.Count} 个文件：\n" + string.Join("\n", lines.Take(50));
-            if (lines.Count > 50) TxtLoosePreview.Text += $"\n… 其余 {lines.Count - 50} 个文件省略";
+
+            var files = ExpandedFiles.ToList();
+            var lines = files.Select(Path.GetFileName).ToList();
+            var summary = $"条目 {LooseEntries.Count} 个，展开后共 {files.Count} 个文件：\n" + string.Join("\n", lines.Take(50));
+            if (lines.Count > 50) summary += $"\n… 其余 {lines.Count - 50} 个文件省略";
+            TxtLoosePreview.Text = summary;
         }
 
         private void Execute_Click(object sender, RoutedEventArgs e)
@@ -119,9 +185,14 @@ namespace RemoteDebugServer.ViewModels
             else // RbLoose
             {
                 UpdateType = "loose";
-                if (LooseFiles.Count == 0)
+                if (LooseEntries.Count == 0)
                 {
-                    System.Windows.MessageBox.Show("请先选择至少一个散文件。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    System.Windows.MessageBox.Show("请先添加至少一个文件或文件夹。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
+                    return;
+                }
+                if (ExpandedFiles.Count == 0)
+                {
+                    System.Windows.MessageBox.Show("选中的文件夹为空，或未包含有效文件。", "提示", MessageBoxButton.OK, MessageBoxImage.Warning);
                     return;
                 }
             }

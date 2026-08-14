@@ -372,12 +372,12 @@ namespace RemoteDebugServer.ViewModels
                 string label = updateType == "persistent" ? "沙盒全量更新"
                               : updateType == "loose" ? "热更散文件" : "AB包增量更新";
 
-                // 散文件模式：直接使用对话框中选中的多个文件
+                // 散文件模式：展开对话框中添加的文件和文件夹为最终推送文件列表
                 string[] files;
                 string sourceDir = "";
                 if (updateType == "loose")
                 {
-                    files = dialog.LooseFiles.ToArray();
+                    files = dialog.ExpandedFiles.ToArray();
                 }
                 else
                 {

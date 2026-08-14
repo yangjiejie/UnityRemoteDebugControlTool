@@ -1,0 +1,25 @@
+# 知识卡导出索引文件
+schema_version: 1
+locale: zh-CN
+branch: main
+exported_at: "2026-08-14T05:38:44Z"
+modules:
+    protocol_definitions:
+        dir_name: 游戏协议定义与注册表（HotFix.Ctrl Protobuf）
+        title: 游戏协议定义与注册表（HotFix.Ctrl Protobuf）
+        scope:
+            - Protocol/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []
+    ui_layer:
+        dir_name: WPF 调试工具 UI 层（视图与视图模型）
+        title: WPF 调试工具 UI 层（视图与视图模型）
+        scope:
+            - Views/
+            - ViewModels/
+        source_files: []
+        children: []
+        depends_on: []
+        related_to: []

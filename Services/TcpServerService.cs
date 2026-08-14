@@ -486,7 +486,13 @@ namespace RemoteDebugServer.Services
 
             try
             {
-                string deviceDir = Path.Combine(ReceivedFilesDirectory, device.DeviceId, fileData.FileType);
+                // 使用设备别名（左侧显示的主机名）作为接收目录，便于识别
+                string safeAlias = SanitizeFolderName(device.Alias);
+                string shortId = device.DeviceId.Length > 8 ? device.DeviceId[..8] : device.DeviceId;
+                string deviceFolder = string.IsNullOrWhiteSpace(safeAlias)
+                    ? shortId
+                    : $"{safeAlias}_{shortId}";
+                string deviceDir = Path.Combine(ReceivedFilesDirectory, deviceFolder, fileData.FileType);
                 Directory.CreateDirectory(deviceDir);
 
                 string fileName = $"{DateTime.Now:yyyyMMdd_HHmmss}_{fileData.FileName}";
@@ -542,6 +548,24 @@ namespace RemoteDebugServer.Services
         private void Log(string message)
         {
             OnServerLog?.Invoke($"[{DateTime.Now:HH:mm:ss}] {message}");
+        }
+
+        /// <summary>
+        /// 将设备别名清理为合法的文件夹名称（替换非法文件名字符为下划线）
+        /// </summary>
+        private static string SanitizeFolderName(string name)
+        {
+            if (string.IsNullOrWhiteSpace(name))
+                return "unknown";
+
+            var invalid = Path.GetInvalidFileNameChars();
+            var sb = new System.Text.StringBuilder(name.Length);
+            foreach (char c in name)
+            {
+                sb.Append(invalid.Contains(c) ? '_' : c);
+            }
+            string result = sb.ToString().Trim();
+            return string.IsNullOrWhiteSpace(result) ? "unknown" : result;
         }
 
         #endregion

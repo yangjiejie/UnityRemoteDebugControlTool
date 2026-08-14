@@ -1,7 +1,7 @@
 <Window x:Class="RemoteDebugServer.ViewModels.HotUpdateDialog"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="触发热更新" Width="560" Height="440"
+        Title="触发热更新" Width="560" Height="520"
         WindowStartupLocation="CenterOwner"
         ResizeMode="NoResize"
         Background="#2D2D30" Foreground="#E0E0E0"
@@ -38,15 +38,15 @@
             <RadioButton x:Name="RbLoose"
                          GroupName="HotUpdateType" Margin="0,8,0,4" FontSize="13">
                 <StackPanel>
-                    <TextBlock Text="热更散文件（多选，更新到持久化根目录）" FontWeight="SemiBold"/>
-                    <TextBlock Text="逐个文件直接写入客户端 persistentData/ 根目录（不保留子目录）"
+                    <TextBlock Text="热更散文件/文件夹（批量多选，更新到持久化根目录）" FontWeight="SemiBold"/>
+                    <TextBlock Text="文件或文件夹内文件逐个写入客户端 persistentData/ 根目录（不保留子目录）"
                                FontSize="11" Foreground="#999" Margin="20,2,0,0"/>
                 </StackPanel>
             </RadioButton>
         </StackPanel>
 
         <!-- 源目录（AB / 持久化目录模式） -->
-        <Grid Grid.Row="2" Margin="0,0,0,8">
+        <Grid Grid.Row="2" Margin="0,0,0,8" Visibility="{Binding SourcePreviewVisibility}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -66,37 +66,35 @@
             </Grid>
         </Grid>
 
-        <!-- 散文件多选（仅散文件模式可用） -->
-        <Grid Grid.Row="3" Margin="0,0,0,8">
+        <!-- 散文件/文件夹多选（仅散文件模式可用） -->
+        <Grid Grid.Row="3" Margin="0,0,0,8" Visibility="{Binding LooseVisibility}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <TextBlock Text="选择散文件（支持多选）" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,6"
-                       IsEnabled="{Binding IsLooseChecked}"/>
-            <Grid Grid.Row="1">
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="*"/>
-                </Grid.RowDefinitions>
-                <Grid>
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="Auto"/>
-                    </Grid.ColumnDefinitions>
-                    <TextBox x:Name="TxtLooseFiles" Background="#3C3C3C" Foreground="#E0E0E0"
-                             BorderThickness="1" BorderBrush="#555" Padding="6,4"
-                             VerticalAlignment="Center" IsReadOnly="True"
-                             Text="未选择文件"/>
-                    <Button Grid.Column="1" Content="选择文件…" Width="80" Height="26"
-                            Background="#555" Foreground="White" BorderThickness="0"
-                            Click="SelectLooseFiles_Click" Margin="6,0,0,0"/>
-                </Grid>
-                <Border Grid.Row="1" Background="#2A2A1A" CornerRadius="3" Padding="10,8" Margin="0,6,0,0">
-                    <TextBlock x:Name="TxtLoosePreview" FontSize="11" Foreground="#FFC107"
-                               TextWrapping="Wrap" Text="散文件模式将逐个以文件名写入持久化根目录（不保留子目录）。"/>
-                </Border>
-            </Grid>
+            <TextBlock Text="选择散文件/文件夹（支持批量文件和文件夹）" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,6"/>
+            <StackPanel Grid.Row="1" Orientation="Horizontal" HorizontalAlignment="Left" Margin="0,0,0,6">
+                <Button Content="添加文件…" Width="80" Height="26" Background="#555" Foreground="White" BorderThickness="0"
+                        Click="AddLooseFiles_Click"/>
+                <Button Content="添加文件夹…" Width="90" Height="26" Background="#555" Foreground="White" BorderThickness="0"
+                        Click="AddLooseFolder_Click" Margin="6,0,0,0"/>
+                <Button Content="移除选中" Width="75" Height="26" Background="#555" Foreground="White" BorderThickness="0"
+                        Click="RemoveLooseSelected_Click" Margin="6,0,0,0"/>
+            </StackPanel>
+            <ListBox x:Name="LstLooseEntries" Grid.Row="2" Background="#3C3C3C" Foreground="#E0E0E0"
+                     BorderBrush="#555" BorderThickness="1" SelectionMode="Extended">
+                <ListBox.ItemContainerStyle>
+                    <Style TargetType="ListBoxItem">
+                        <Setter Property="Padding" Value="6,3"/>
+                    </Style>
+                </ListBox.ItemContainerStyle>
+            </ListBox>
+            <Border Grid.Row="3" Background="#2A2A1A" CornerRadius="3" Padding="10,8" Margin="0,6,0,0">
+                <TextBlock x:Name="TxtLoosePreview" FontSize="11" Foreground="#FFC107"
+                           TextWrapping="Wrap" Text="散文件模式将逐个以文件名写入持久化根目录（不保留子目录）。"/>
+            </Border>
         </Grid>
 
         <!-- 预览（AB / 持久化目录模式） -->

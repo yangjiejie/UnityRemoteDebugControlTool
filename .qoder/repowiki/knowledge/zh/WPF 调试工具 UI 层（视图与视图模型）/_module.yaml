@@ -1,0 +1,9 @@
+schema_version: 1
+module_path: ui_layer
+title: WPF 调试工具 UI 层（视图与视图模型）
+scope:
+    - Views/
+    - ViewModels/
+source_files: []
+depends_on: []
+related_to: []
