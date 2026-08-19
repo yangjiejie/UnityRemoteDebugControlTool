@@ -6,6 +6,7 @@ using System.Collections.Concurrent;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using System.Net;
 using System.Net.NetworkInformation;
@@ -369,11 +370,12 @@ namespace RemoteDebugServer.ViewModels
                 string updateType = dialog.UpdateType; // assetbundle / persistent / loose
                 // 散文件与持久化目录都写入持久化根目录；只有 AB 模式写入 platform 子目录
                 string fileType = updateType == "assetbundle" ? "hotupdate_ab" : "hotupdate_persistent";
+                string zipFileType = updateType == "assetbundle" ? "hotupdate_zip_ab" : "hotupdate_zip_persistent";
                 string label = updateType == "persistent" ? "沙盒全量更新"
                               : updateType == "loose" ? "热更散文件" : "AB包增量更新";
 
                 // 散文件模式：展开对话框中添加的文件和文件夹为最终推送文件列表
-                string[] files;
+                HotUpdateFileEntry[] files;
                 string sourceDir = "";
                 if (updateType == "loose")
                 {
@@ -382,7 +384,13 @@ namespace RemoteDebugServer.ViewModels
                 else
                 {
                     sourceDir = dialog.SourceDirectory;
-                    files = System.IO.Directory.GetFiles(sourceDir, "*", System.IO.SearchOption.AllDirectories);
+                    files = System.IO.Directory.GetFiles(sourceDir, "*", System.IO.SearchOption.AllDirectories)
+                        .Select(f => new HotUpdateFileEntry
+                        {
+                            LocalPath = f,
+                            RelativePath = GetRelativePath(sourceDir, f),
+                        })
+                        .ToArray();
                 }
 
                 if (files.Length == 0)
@@ -407,33 +415,31 @@ namespace RemoteDebugServer.ViewModels
                     return;
                 }
 
-                // 逐个发送文件
-                int sent = 0;
-                int failed = 0;
-                foreach (var filePath in files)
+                // 文件数大于1时打包成zip一次性发送；单文件保持原逻辑
+                if (files.Length > 1)
                 {
-                    // 散文件模式：直接以文件名写入持久化根目录（不保留子目录）
-                    string relativePath = updateType == "loose"
-                        ? System.IO.Path.GetFileName(filePath)
-                        : GetRelativePath(sourceDir, filePath);
+                    string zipName = $"hotupdate_{updateType}_{DateTime.Now:yyyyMMdd_HHmmss}.zip";
+                    AppendServerLog($"开始打包 {files.Length} 个文件为 {zipName}...");
+                    byte[] zipBytes = CreateHotUpdateZip(files);
+                    AppendServerLog($"打包完成，zip 大小 {zipBytes.Length / 1024}KB，开始发送...");
+
                     bool ok = await _serverService.SendFileToDeviceAsync(
-                        _selectedDevice.DeviceId, filePath, relativePath, fileType);
+                        _selectedDevice.DeviceId, zipBytes, zipName, zipName, zipFileType);
                     if (ok)
-                    {
-                        sent++;
-                        AppendServerLog($"  已发送 ({sent}/{files.Length}): {relativePath}");
-                    }
+                        AppendServerLog($"热更新完成: zip 包发送成功 -> {_selectedDevice.Alias}");
                     else
-                    {
-                        failed++;
-                        AppendServerLog($"  发送失败: {relativePath}");
-                    }
-
-                    // 小延迟避免网络拥塞
-                    await Task.Delay(50);
+                        AppendServerLog($"热更新失败: zip 包发送失败 -> {_selectedDevice.Alias}");
                 }
-
-                AppendServerLog($"热更新完成: 成功 {sent}, 失败 {failed} -> {_selectedDevice.Alias}");
+                else
+                {
+                    var entry = files[0];
+                    bool ok = await _serverService.SendFileToDeviceAsync(
+                        _selectedDevice.DeviceId, entry.LocalPath, entry.RelativePath, fileType);
+                    if (ok)
+                        AppendServerLog($"热更新完成: 已发送 {entry.RelativePath} -> {_selectedDevice.Alias}");
+                    else
+                        AppendServerLog($"热更新失败: 发送 {entry.RelativePath} 失败 -> {_selectedDevice.Alias}");
+                }
             }
         }
 
@@ -447,6 +453,23 @@ namespace RemoteDebugServer.ViewModels
                 return full.Substring(root.Length + 1);
 
             return System.IO.Path.GetFileName(full);
+        }
+
+        /// <summary>
+        /// 将热更新文件列表打包为 zip（每个条目保留自己的 RelativePath 目录结构）
+        /// </summary>
+        private static byte[] CreateHotUpdateZip(HotUpdateFileEntry[] entries)
+        {
+            using var ms = new MemoryStream();
+            using (var archive = new ZipArchive(ms, ZipArchiveMode.Create, true))
+            {
+                foreach (var entry in entries)
+                {
+                    string entryName = entry.RelativePath.Replace('\\', '/');
+                    archive.CreateEntryFromFile(entry.LocalPath, entryName);
+                }
+            }
+            return ms.ToArray();
         }
 
         #endregion

@@ -12,10 +12,19 @@ using Microsoft.Win32;
 namespace RemoteDebugServer.ViewModels
 {
     /// <summary>
+    /// 热更新文件条目：本地路径 + 在目标端保留的相对路径
+    /// </summary>
+    public class HotUpdateFileEntry
+    {
+        public string LocalPath { get; set; } = "";
+        public string RelativePath { get; set; } = "";
+    }
+
+    /// <summary>
     /// 触发热更新对话框。支持三种模式：
     /// - AB 包增量热更新（源目录 -> persistentData/{platform}）
     /// - 沙盒持久化目录更新（源目录 -> persistentData 根目录）
-    /// - 热更散文件/文件夹（批量多选 -> persistentData 根目录，按文件名）
+    /// - 热更散文件/文件夹（批量多选 -> persistentData 根目录，文件放根目录，文件夹保留结构）
     /// </summary>
     public partial class HotUpdateDialog : Window, INotifyPropertyChanged
     {
@@ -28,23 +37,42 @@ namespace RemoteDebugServer.ViewModels
         /// <summary>散文件模式下选中的文件/文件夹条目（完整路径）</summary>
         public ObservableCollection<string> LooseEntries { get; } = new ObservableCollection<string>();
 
-        /// <summary>散文件模式下展开后的所有文件路径（文件夹会被递归展开，自动去重）</summary>
-        public IReadOnlyList<string> ExpandedFiles
+        /// <summary>
+        /// 散文件模式下展开后的所有文件条目：
+        /// - 单个文件直接放到目标根目录（RelativePath 为文件名）
+        /// - 文件夹保留其内部目录结构（RelativePath 包含文件夹名）
+        /// </summary>
+        public IReadOnlyList<HotUpdateFileEntry> ExpandedFiles
         {
             get
             {
-                var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var dict = new Dictionary<string, HotUpdateFileEntry>(StringComparer.OrdinalIgnoreCase);
                 foreach (var entry in LooseEntries)
                 {
                     if (File.Exists(entry))
-                        set.Add(entry);
+                    {
+                        string rel = Path.GetFileName(entry);
+                        dict[rel] = new HotUpdateFileEntry
+                        {
+                            LocalPath = entry,
+                            RelativePath = rel,
+                        };
+                    }
                     else if (Directory.Exists(entry))
                     {
+                        string folderName = Path.GetFileName(entry.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar));
                         foreach (var file in Directory.GetFiles(entry, "*", SearchOption.AllDirectories))
-                            set.Add(file);
+                        {
+                            string rel = Path.Combine(folderName, Path.GetRelativePath(entry, file)).Replace('\\', '/');
+                            dict[rel] = new HotUpdateFileEntry
+                            {
+                                LocalPath = file,
+                                RelativePath = rel,
+                            };
+                        }
                     }
                 }
-                return set.ToList();
+                return dict.Values.ToList();
             }
         }
 
@@ -151,13 +179,13 @@ namespace RemoteDebugServer.ViewModels
         {
             if (LooseEntries.Count == 0)
             {
-                TxtLoosePreview.Text = "散文件模式将逐个以文件名写入持久化根目录（不保留子目录）。\n点击“添加文件…”或“添加文件夹…”批量选择。";
+                TxtLoosePreview.Text = "散文件模式：文件直接写入持久化根目录，文件夹保留子目录结构。\n点击“添加文件…”或“添加文件夹…”批量选择。";
                 return;
             }
 
-            var files = ExpandedFiles.ToList();
-            var lines = files.Select(Path.GetFileName).ToList();
-            var summary = $"条目 {LooseEntries.Count} 个，展开后共 {files.Count} 个文件：\n" + string.Join("\n", lines.Take(50));
+            var entries = ExpandedFiles;
+            var lines = entries.Select(e => e.RelativePath).ToList();
+            var summary = $"条目 {LooseEntries.Count} 个，展开后共 {entries.Count} 个文件：\n" + string.Join("\n", lines.Take(50));
             if (lines.Count > 50) summary += $"\n… 其余 {lines.Count - 50} 个文件省略";
             TxtLoosePreview.Text = summary;
         }

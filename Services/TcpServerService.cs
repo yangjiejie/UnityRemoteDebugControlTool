@@ -212,9 +212,6 @@ namespace RemoteDebugServer.Services
         /// </summary>
         public async Task<bool> SendFileToDeviceAsync(string deviceId, string localFilePath, string relativePath, string fileType)
         {
-            if (!_sessions.TryGetValue(deviceId, out var session) || !session.IsConnected)
-                return false;
-
             if (!File.Exists(localFilePath))
             {
                 Log($"文件不存在: {localFilePath}");
@@ -224,9 +221,28 @@ namespace RemoteDebugServer.Services
             try
             {
                 byte[] fileBytes = await File.ReadAllBytesAsync(localFilePath);
+                return await SendFileToDeviceAsync(deviceId, fileBytes, Path.GetFileName(localFilePath), relativePath, fileType);
+            }
+            catch (Exception ex)
+            {
+                Log($"读取文件失败: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// 向指定设备推送二进制文件数据（服务端→客户端，用于热更新等场景）
+        /// </summary>
+        public async Task<bool> SendFileToDeviceAsync(string deviceId, byte[] fileBytes, string fileName, string relativePath, string fileType)
+        {
+            if (!_sessions.TryGetValue(deviceId, out var session) || !session.IsConnected)
+                return false;
+
+            try
+            {
                 var fileData = new FileTransferData
                 {
-                    FileName = Path.GetFileName(localFilePath),
+                    FileName = fileName,
                     FileSize = fileBytes.Length,
                     FileData = Convert.ToBase64String(fileBytes),
                     FileType = fileType,
