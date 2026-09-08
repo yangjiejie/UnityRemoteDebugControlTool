@@ -23,6 +23,7 @@ using RemoteDebugServer.Services;
 using Application = System.Windows.Application;
 using Clipboard = System.Windows.Clipboard;
 using MessageBox = System.Windows.MessageBox;
+using SaveFileDialog = Microsoft.Win32.SaveFileDialog;
 
 namespace RemoteDebugServer.ViewModels
 {
@@ -193,6 +194,7 @@ namespace RemoteDebugServer.ViewModels
         public ICommand ClearLogsCommand { get; }
         public ICommand ClearServerLogCommand { get; }
         public ICommand CopyLogsCommand { get; }
+        public ICommand SaveLogsCommand { get; }
         public ICommand OpenFileDirectoryCommand { get; }
 
         // 场景树更新事件（通知 View 刷新 UI）
@@ -216,6 +218,7 @@ namespace RemoteDebugServer.ViewModels
             ClearLogsCommand = new RelayCommand(_ => ClearLogs());
             ClearServerLogCommand = new RelayCommand(_ => ClearServerLog());
             CopyLogsCommand = new RelayCommand(_ => CopyAllLogs());
+            SaveLogsCommand = new RelayCommand(_ => SaveLogs());
             OpenFileDirectoryCommand = new RelayCommand(_ => OpenFileDirectory());
         }
 
@@ -554,6 +557,48 @@ namespace RemoteDebugServer.ViewModels
             catch (Exception ex)
             {
                 AppendServerLog($"复制失败: {ex.Message}");
+            }
+        }
+
+        private void SaveLogs()
+        {
+            if (FilteredLogs.Count == 0)
+            {
+                MessageBox.Show("当前没有日志可保存", "提示", MessageBoxButton.OK, MessageBoxImage.Information);
+                return;
+            }
+
+            var deviceName = _selectedDevice?.Alias ?? "unknown";
+            var dlg = new SaveFileDialog
+            {
+                Title = "保存日志文件",
+                Filter = "日志文件 (*.log)|*.log|文本文件 (*.txt)|*.txt|所有文件 (*.*)|*.*",
+                FileName = $"{deviceName}_logs_{DateTime.Now:yyyyMMdd_HHmmss}.log",
+            };
+
+            if (dlg.ShowDialog() != true) return;
+
+            try
+            {
+                var sb = new System.Text.StringBuilder();
+                sb.AppendLine($"# 设备: {deviceName}");
+                sb.AppendLine($"# 导出时间: {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+                sb.AppendLine($"# 日志条数: {FilteredLogs.Count}");
+                sb.AppendLine(new string('#', 60));
+
+                foreach (var log in FilteredLogs)
+                {
+                    sb.AppendLine($"{log.Time:yyyy-MM-dd HH:mm:ss.fff} {log.Level} {log.Message}");
+                    if (!string.IsNullOrEmpty(log.StackTrace))
+                        sb.AppendLine($"  StackTrace: {log.StackTrace}");
+                }
+
+                File.WriteAllText(dlg.FileName, sb.ToString(), System.Text.Encoding.UTF8);
+                AppendServerLog($"已保存 {FilteredLogs.Count} 条日志到: {dlg.FileName}");
+            }
+            catch (Exception ex)
+            {
+                AppendServerLog($"保存日志失败: {ex.Message}");
             }
         }
 

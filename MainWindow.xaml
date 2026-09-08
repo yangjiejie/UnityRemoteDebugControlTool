@@ -389,6 +389,8 @@
                                      FontSize="12"/>
                         <Button Content="复制全部" Command="{Binding CopyLogsCommand}"
                                 Style="{StaticResource ActionButton}" FontSize="11" Width="65" Margin="4,0"/>
+                        <Button Content="保存日志" Command="{Binding SaveLogsCommand}"
+                                Style="{StaticResource ActionButton}" FontSize="11" Width="65" Margin="4,0"/>
                         <Button Content="清除" Command="{Binding ClearLogsCommand}"
                                 Style="{StaticResource ActionButton}" FontSize="11" Width="50"/>
                         </StackPanel>

@@ -445,6 +445,10 @@ namespace RemoteDebugServer.Services
                     await ProcessFileTransfer(device, msg);
                     break;
 
+                case MessageType.UpdateDeviceInfo:
+                    ProcessUpdateDeviceInfo(device, msg);
+                    break;
+
                 case MessageType.Disconnect:
                     // 客户端主动断开，立即结束当前会话并触发清理
                     throw new EndOfStreamException("客户端主动断开连接");
@@ -495,6 +499,20 @@ namespace RemoteDebugServer.Services
             }
         }
 
+        private void ProcessUpdateDeviceInfo(ConnectedDevice device, DebugMessage msg)
+        {
+            var data = msg.ParseData<UpdateDeviceInfoData>();
+            if (data == null) return;
+
+            device.Platform = data.Platform;
+            device.AppVersion = data.AppVersion;
+            device.UnityVersion = data.UnityVersion;
+            device.HotUpdateVersion = data.HotUpdateVersion;
+            device.NotifyReconnectInfoChanged();
+
+            Log($"设备信息更新: {device.DeviceName} [{device.Platform}] Unity {device.UnityVersion} App {device.AppVersion} 资源 {device.HotUpdateVersion}");
+        }
+
         private async Task ProcessFileTransfer(ConnectedDevice device, DebugMessage msg)
         {
             var fileData = msg.ParseData<FileTransferData>();
@@ -511,7 +529,8 @@ namespace RemoteDebugServer.Services
                 string deviceDir = Path.Combine(ReceivedFilesDirectory, deviceFolder, fileData.FileType);
                 Directory.CreateDirectory(deviceDir);
 
-                string fileName = $"{DateTime.Now:yyyyMMdd_HHmmss}_{fileData.FileName}";
+                // 直接使用原始文件名保存（同名文件重复接收时覆盖）
+                string fileName = SanitizeFolderName(fileData.FileName);
                 string filePath = Path.Combine(deviceDir, fileName);
 
                 byte[] fileBytes = Convert.FromBase64String(fileData.FileData);

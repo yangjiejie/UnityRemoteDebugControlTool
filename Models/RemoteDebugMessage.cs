@@ -23,6 +23,7 @@ namespace RemoteDebugServer.Models
         FileRequest,
         Disconnect,
         MockProtocol,        // 模拟游戏服务器下发的 SC 协议
+        UpdateDeviceInfo,    // 客户端更新设备信息（如热更后版本号变化）
     }
 
     #endregion
@@ -62,6 +63,13 @@ namespace RemoteDebugServer.Models
         /// <summary>资源热更新版本号，对应客户端 remoteConfig.version（JSON 键 hotUpdateVersion）。</summary>
         public string HotUpdateVersion { get; set; } = "";
         public long StartTime { get; set; }
+    }
+
+    /// <summary>
+    /// 设备信息更新（热更后版本号等字段变化时由客户端主动推送）
+    /// </summary>
+    public class UpdateDeviceInfoData : RegisterData
+    {
     }
 
     #endregion
