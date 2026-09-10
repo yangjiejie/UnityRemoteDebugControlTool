@@ -56,6 +56,9 @@ namespace RemoteDebugServer.ViewModels
         private string _logFilterText = "";
         private bool _logViewActive; // 日志页是否可见，仅在可见时才重建/更新日志文本框
 
+        // 正在录制视频的设备 DeviceId 集合
+        private readonly HashSet<string> _recordingDevices = new();
+
         public ObservableCollection<ConnectedDevice> Devices { get; } = new();
         public List<LogDisplayEntry> FilteredLogs { get; } = new();
         public ObservableCollection<string> CommandHistory { get; } = new();
@@ -115,11 +118,19 @@ namespace RemoteDebugServer.ViewModels
                 if (_selectedDevice != null) _selectedDevice.IsSelected = true;
                 OnPropertyChanged(); 
                 OnPropertyChanged(nameof(IsDeviceSelected)); 
+                OnPropertyChanged(nameof(IsRecordingForSelectedDevice));
+                OnPropertyChanged(nameof(RecordButtonContent));
                 UpdateFilteredLogs(); 
             }
         }
 
         public bool IsDeviceSelected => _selectedDevice != null;
+
+        /// <summary>当前选中设备是否正在录制视频</summary>
+        public bool IsRecordingForSelectedDevice => _selectedDevice != null && _recordingDevices.Contains(_selectedDevice.DeviceId);
+
+        /// <summary>录制视频按钮显示文本</summary>
+        public string RecordButtonContent => IsRecordingForSelectedDevice ? "⏹ 停止" : "🎥 录制";
 
         public string CommandText
         {
@@ -186,6 +197,7 @@ namespace RemoteDebugServer.ViewModels
         public ICommand RequestSceneTreeCommand { get; }
         public ICommand RequestLogsCommand { get; }
         public ICommand RequestScreenshotCommand { get; }
+        public ICommand RecordVideoCommand { get; }
         public ICommand ClearCacheCommand { get; }
         public ICommand PingDeviceCommand { get; }
         public ICommand SendFileRequestCommand { get; }
@@ -210,6 +222,7 @@ namespace RemoteDebugServer.ViewModels
             RequestSceneTreeCommand = new RelayCommand(async _ => await SendCommand("GetSceneTree"), _ => IsDeviceSelected);
             RequestLogsCommand = new RelayCommand(async _ => await SendCommand("SendLogFiles"), _ => IsDeviceSelected);
             RequestScreenshotCommand = new RelayCommand(async _ => await SendCommand("TakeScreenshot"), _ => IsDeviceSelected);
+            RecordVideoCommand = new RelayCommand(async _ => await ToggleRecordingAsync(), _ => IsDeviceSelected);
             ClearCacheCommand = new RelayCommand(async _ => await SendCommand("ClearCache"), _ => IsDeviceSelected);
             PingDeviceCommand = new RelayCommand(async _ => await SendCommand("Ping"), _ => IsDeviceSelected);
             SendFileRequestCommand = new RelayCommand(async _ => await SendFileRequest(), _ => IsDeviceSelected);
@@ -611,6 +624,49 @@ namespace RemoteDebugServer.ViewModels
                 MessageBox.Show($"目录不存在: {path}");
         }
 
+        /// <summary>
+        /// 切换当前选中设备的视频录制状态。
+        /// 未录制时发送 StartRecording；录制中时发送 StopRecording 并自动请求视频帧。
+        /// </summary>
+        private async Task ToggleRecordingAsync()
+        {
+            if (_selectedDevice == null) return;
+
+            bool isRecording = _recordingDevices.Contains(_selectedDevice.DeviceId);
+
+            if (!isRecording)
+            {
+                var result = await SendCommandAndWaitAsync("StartRecording");
+                if (result?.Success == true)
+                {
+                    _recordingDevices.Add(_selectedDevice.DeviceId);
+                    OnPropertyChanged(nameof(IsRecordingForSelectedDevice));
+                    OnPropertyChanged(nameof(RecordButtonContent));
+                    AppendServerLog($"[录制] 开始录制视频 -> {_selectedDevice.Alias}");
+                }
+                else
+                {
+                    AppendServerLog($"[录制] 开始录制失败 -> {_selectedDevice.Alias}");
+                }
+            }
+            else
+            {
+                var result = await SendCommandAndWaitAsync("StopRecording");
+                if (result?.Success == true)
+                {
+                    _recordingDevices.Remove(_selectedDevice.DeviceId);
+                    OnPropertyChanged(nameof(IsRecordingForSelectedDevice));
+                    OnPropertyChanged(nameof(RecordButtonContent));
+                    AppendServerLog($"[录制] 已停止录制，正在请求视频帧 -> {_selectedDevice.Alias}");
+                    await SendCommand("RequestVideo");
+                }
+                else
+                {
+                    AppendServerLog($"[录制] 停止录制失败 -> {_selectedDevice.Alias}");
+                }
+            }
+        }
+
         #endregion
 
         #region 回调处理
@@ -662,6 +718,7 @@ namespace RemoteDebugServer.ViewModels
             Application.Current.Dispatcher.Invoke(() =>
             {
                 Devices.Remove(device);
+                _recordingDevices.Remove(device.DeviceId);
                 OnPropertyChanged(nameof(HasDevices));
                 if (_selectedDevice == device)
                 {

@@ -453,6 +453,19 @@
                                     Style="{StaticResource ActionButton}" Width="65"/>
                             <Button Content="📷 截图" Command="{Binding RequestScreenshotCommand}"
                                     Style="{StaticResource ActionButton}" Width="65"/>
+                            <Button Content="{Binding RecordButtonContent}"
+                                    Command="{Binding RecordVideoCommand}" Width="75">
+                                <Button.Style>
+                                    <Style BasedOn="{StaticResource ActionButton}" TargetType="Button">
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsRecordingForSelectedDevice}" Value="True">
+                                                <Setter Property="Background" Value="#FF5252"/>
+                                                <Setter Property="Foreground" Value="White"/>
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Button.Style>
+                            </Button>
                             <Button Content="🗑 清缓存" Command="{Binding ClearCacheCommand}"
                                     Style="{StaticResource ActionButton}" Width="75"/>
                             <Button Content="📁 请求文件" Command="{Binding SendFileRequestCommand}"
