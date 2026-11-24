@@ -84,12 +84,14 @@ RemoteDebugServer/
 | SendLogFiles | 发送所有日志文件 |
 | SendFile | 发送指定文件 |
 | TakeScreenshot | 截图并发送 |
-| StartRecording | 开始录制视频(帧截图模式) |
-| StopRecording | 停止录制 |
-| RequestVideo | 发送录制的视频帧 |
+| GetRecordingStatus | 查询视频协议版本、录制状态和错误 |
+| StartRecording | 设备端开始录制游戏画面及游戏声音 |
+| StopRecording | 停止编码、上传本次 MP4，服务器校验成功后删除客户端原文件 |
 | SetLogLevel | 设置日志级别(log/warning/error) |
 
 ## 快速开始
+
+视频录制的部署要求、平台差异和验证步骤见 [录制说明](docs/video-recording.md)。服务端和 Unity 客户端须一起更新。
 
 ### 1. 启动 WPF 服务端
 
@@ -133,8 +135,12 @@ RemoteDebuggerSetup.Disconnect();
 ### 3. 局域网配置
 
 1. 将服务端IP改为你的**局域网内网IP**（如 192.168.x.x）
-2. Unity客户端 `serverIp` 设为同一IP
+2. Unity 的 `Assets/Scripts/RemoteDebugger/RemoteDebuggerSetup.cs` 中通过 `DefaultServerIp` 写死调试电脑地址，`serverPort` 默认 19527。编辑器与真机共用该默认地址；组件显式填写的地址优先，不读取 Resources 或 JSON 配置。
 3. 确保防火墙允许端口 19527 的TCP流量
+
+调试服务器地址与 `RemoteMgr.serverIp`（热更新服务器）相互独立。当前配置为 `172.17.24.119:19527`；电脑地址变化时需要更新配置。手机必须能访问该电脑的局域网地址，同一 Wi-Fi 的客户端隔离也可能阻止连接。
+
+项目仍通过 `GameController.StartUpWhiteDevice` 启动调试模块：编辑器、含 `DebugMod` 的包或管理员白名单设备才会启动。`RemoteDebugger/link.xml` 保留反射加载的模块，避免打包裁剪。真机日志中搜索 `[RemoteDebugger]`：初始化日志会显示实际目标，连接失败会给出原因；TCP 连接超过 10 秒会超时并自动退避重试。没有初始化日志时，应先检查启动条件及模块是否被打入安装包。
 
 ## 扩展指南
 

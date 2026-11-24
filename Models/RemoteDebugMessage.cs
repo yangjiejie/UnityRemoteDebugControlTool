@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
@@ -20,6 +20,8 @@ namespace RemoteDebugServer.Models
         Command,
         CommandResult,
         FileTransfer,
+        VideoChunk,
+        VideoTransferResult,
         FileRequest,
         Disconnect,
         MockProtocol,        // 模拟游戏服务器下发的 SC 协议

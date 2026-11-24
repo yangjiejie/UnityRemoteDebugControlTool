@@ -8,6 +8,7 @@
 # 编译产物
 bin/
 obj/
+.codex-build/
 *.pdb
 *.exe
 *.dll

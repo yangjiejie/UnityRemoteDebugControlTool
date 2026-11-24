@@ -16,6 +16,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Tests/**/*.cs" />
     <!-- 模拟游戏服务器发包所用的 protobuf 协议类（HotFix.Ctrl）依赖此包 -->
     <PackageReference Include="Google.Protobuf" Version="3.28.3" />
   </ItemGroup>

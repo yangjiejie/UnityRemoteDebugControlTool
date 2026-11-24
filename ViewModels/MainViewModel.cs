@@ -1,4 +1,4 @@
-
+﻿
 
 using System;
 using System.Collections.Generic;
@@ -36,6 +36,7 @@ namespace RemoteDebugServer.ViewModels
 
         // 等待客户端指令结果的 TaskCompletionSource，key = CommandId
         private readonly ConcurrentDictionary<string, TaskCompletionSource<CommandResult>> _pendingCommands = new();
+        private readonly ConcurrentDictionary<string, string> _pendingCommandDevices = new();
 
         // 绑定属性
         private int _port = 19527;
@@ -58,6 +59,7 @@ namespace RemoteDebugServer.ViewModels
 
         // 正在录制视频的设备 DeviceId 集合
         private readonly HashSet<string> _recordingDevices = new();
+        private readonly HashSet<string> _recordingBusy = new();
 
         public ObservableCollection<ConnectedDevice> Devices { get; } = new();
         public List<LogDisplayEntry> FilteredLogs { get; } = new();
@@ -130,7 +132,7 @@ namespace RemoteDebugServer.ViewModels
         public bool IsRecordingForSelectedDevice => _selectedDevice != null && _recordingDevices.Contains(_selectedDevice.DeviceId);
 
         /// <summary>录制视频按钮显示文本</summary>
-        public string RecordButtonContent => IsRecordingForSelectedDevice ? "⏹ 停止" : "🎥 录制";
+        public string RecordButtonContent => _selectedDevice != null && _recordingBusy.Contains(_selectedDevice.DeviceId) ? "处理中…" : IsRecordingForSelectedDevice ? "⏹ 停止" : "🎥 录制";
 
         public string CommandText
         {
@@ -222,7 +224,7 @@ namespace RemoteDebugServer.ViewModels
             RequestSceneTreeCommand = new RelayCommand(async _ => await SendCommand("GetSceneTree"), _ => IsDeviceSelected);
             RequestLogsCommand = new RelayCommand(async _ => await SendCommand("SendLogFiles"), _ => IsDeviceSelected);
             RequestScreenshotCommand = new RelayCommand(async _ => await SendCommand("TakeScreenshot"), _ => IsDeviceSelected);
-            RecordVideoCommand = new RelayCommand(async _ => await ToggleRecordingAsync(), _ => IsDeviceSelected);
+            RecordVideoCommand = new RelayCommand(async _ => await ToggleRecordingAsync(), _ => IsDeviceSelected && !_recordingBusy.Contains(_selectedDevice!.DeviceId));
             ClearCacheCommand = new RelayCommand(async _ => await SendCommand("ClearCache"), _ => IsDeviceSelected);
             PingDeviceCommand = new RelayCommand(async _ => await SendCommand("Ping"), _ => IsDeviceSelected);
             SendFileRequestCommand = new RelayCommand(async _ => await SendFileRequest(), _ => IsDeviceSelected);
@@ -299,22 +301,28 @@ namespace RemoteDebugServer.ViewModels
         /// 发送指令并等待客户端返回 CommandResult（带超时）
         /// 返回 null 表示发送失败或超时
         /// </summary>
-        public async Task<CommandResult?> SendCommandAndWaitAsync(string command, string parameters = "", int timeoutMs = 10000)
+        public Task<CommandResult?> SendCommandAndWaitAsync(string command, string parameters = "", int timeoutMs = 10000)
         {
-            if (_selectedDevice == null) return null;
+            return _selectedDevice == null ? Task.FromResult<CommandResult?>(null) : SendCommandToDeviceAndWaitAsync(_selectedDevice, command, parameters, timeoutMs);
+        }
+
+        private async Task<CommandResult?> SendCommandToDeviceAndWaitAsync(ConnectedDevice device, string command, string parameters = "", int timeoutMs = 10000)
+        {
 
             // 先生成 CommandId 并注册 tcs，再发送命令，避免响应先于注册到达
             //commonId具有唯一性  客户端执行完毕之后会把guid回传 
             string commandId = Guid.NewGuid().ToString("N");
             var tcs = new TaskCompletionSource<CommandResult>(TaskCreationOptions.RunContinuationsAsynchronously);
             _pendingCommands[commandId] = tcs;
+            _pendingCommandDevices[commandId] = device.DeviceId;
 
             AppendServerLog($"等待客户端响应: {command} [{commandId[..8]}]");
 
-            var (sent, _) = await _serverService.SendCommandAsync(_selectedDevice.DeviceId, command, parameters, commandId);
+            var (sent, _) = await _serverService.SendCommandAsync(device.DeviceId, command, parameters, commandId);
             if (!sent)
             {
                 _pendingCommands.TryRemove(commandId, out _);
+                _pendingCommandDevices.TryRemove(commandId, out _);
                 return null;
             }
 
@@ -326,7 +334,7 @@ namespace RemoteDebugServer.ViewModels
                 if (completed == tcs.Task)
                 {
                     var result = tcs.Task.Result;
-                    AppendServerLog($"[指令结果] {_selectedDevice.Alias}: {(result.Success ? "成功" : "失败")} - {result.Message}");
+                    AppendServerLog($"[指令结果] {device.Alias}: {(result.Success ? "成功" : "失败")} - {result.Message}");
                     return result;
                 }
                 else
@@ -339,6 +347,7 @@ namespace RemoteDebugServer.ViewModels
             {
                 //消费掉 commonId不然这个容器越来越大 最后会有性能问题
                 _pendingCommands.TryRemove(commandId, out _);
+                _pendingCommandDevices.TryRemove(commandId, out _);
             }
         }
 
@@ -624,47 +633,57 @@ namespace RemoteDebugServer.ViewModels
                 MessageBox.Show($"目录不存在: {path}");
         }
 
-        /// <summary>
-        /// 切换当前选中设备的视频录制状态。
-        /// 未录制时发送 StartRecording；录制中时发送 StopRecording 并自动请求视频帧。
-        /// </summary>
+        private void RefreshRecordingButtons()
+        {
+            OnPropertyChanged(nameof(IsRecordingForSelectedDevice));
+            OnPropertyChanged(nameof(RecordButtonContent));
+            CommandManager.InvalidateRequerySuggested();
+        }
+
         private async Task ToggleRecordingAsync()
         {
-            if (_selectedDevice == null) return;
-
-            bool isRecording = _recordingDevices.Contains(_selectedDevice.DeviceId);
-
-            if (!isRecording)
+            var device = _selectedDevice;
+            if (device == null || !_recordingBusy.Add(device.DeviceId)) return;
+            RefreshRecordingButtons();
+            try
             {
-                var result = await SendCommandAndWaitAsync("StartRecording");
-                if (result?.Success == true)
+                var status = await SendCommandToDeviceAndWaitAsync(device, "GetRecordingStatus");
+                if (status?.Success != true || string.IsNullOrEmpty(status.Data))
                 {
-                    _recordingDevices.Add(_selectedDevice.DeviceId);
-                    OnPropertyChanged(nameof(IsRecordingForSelectedDevice));
-                    OnPropertyChanged(nameof(RecordButtonContent));
-                    AppendServerLog($"[录制] 开始录制视频 -> {_selectedDevice.Alias}");
+                    AppendServerLog("[录制] 请更新 Unity 客户端至支持视频录制协议 v3 的版本");
+                    return;
+                }
+                var data = System.Text.Json.JsonSerializer.Deserialize<RecordingStatusData>(status.Data, JsonOptions.Default);
+                if (data?.ProtocolVersion != 3)
+                    throw new InvalidOperationException("不兼容的视频录制协议");
+                string state = data.State;
+                if (state == "Starting" || state == "Stopping")
+                {
+                    AppendServerLog("[录制] 设备正在授权或封装视频，请稍后再试"); return;
+                }
+                if (state == "Recording" || state == "Ready")
+                {
+                    _recordingDevices.Add(device.DeviceId);
+                    AppendServerLog($"[录制] 正在停止、接收本次视频并清理客户端文件 -> {device.Alias}");
+                    var stopped = await SendCommandToDeviceAndWaitAsync(device, "StopRecording", timeoutMs: 1800000);
+                    if (stopped?.Success != true)
+                    {
+                        AppendServerLog("[录制] 本次操作未完成；未获确认的视频会保留，请点击停止重试");
+                        return;
+                    }
+                    _recordingDevices.Remove(device.DeviceId);
+                    AppendServerLog($"[录制] 本次视频已接收，客户端原视频已删除 -> {device.Alias}");
                 }
                 else
                 {
-                    AppendServerLog($"[录制] 开始录制失败 -> {_selectedDevice.Alias}");
+                    _recordingDevices.Remove(device.DeviceId);
+                    AppendServerLog($"[录制] 正在启动，请留意设备上的系统授权提示 -> {device.Alias}");
+                    var started = await SendCommandToDeviceAndWaitAsync(device, "StartRecording", timeoutMs: 165000);
+                    if (started?.Success == true) _recordingDevices.Add(device.DeviceId);
                 }
             }
-            else
-            {
-                var result = await SendCommandAndWaitAsync("StopRecording");
-                if (result?.Success == true)
-                {
-                    _recordingDevices.Remove(_selectedDevice.DeviceId);
-                    OnPropertyChanged(nameof(IsRecordingForSelectedDevice));
-                    OnPropertyChanged(nameof(RecordButtonContent));
-                    AppendServerLog($"[录制] 已停止录制，正在请求视频帧 -> {_selectedDevice.Alias}");
-                    await SendCommand("RequestVideo");
-                }
-                else
-                {
-                    AppendServerLog($"[录制] 停止录制失败 -> {_selectedDevice.Alias}");
-                }
-            }
+            catch (Exception ex) { AppendServerLog("[录制] " + ex.Message); }
+            finally { _recordingBusy.Remove(device.DeviceId); RefreshRecordingButtons(); }
         }
 
         #endregion
@@ -718,6 +737,10 @@ namespace RemoteDebugServer.ViewModels
             Application.Current.Dispatcher.Invoke(() =>
             {
                 Devices.Remove(device);
+                foreach (var pending in _pendingCommandDevices.Where(p => p.Value == device.DeviceId))
+                    if (_pendingCommands.TryGetValue(pending.Key, out var completion))
+                        completion.TrySetResult(new CommandResult { CommandId = pending.Key, Success = false, Message = "设备已断开；未完成上传的视频保留在设备上，重连后点击停止重试" });
+
                 _recordingDevices.Remove(device.DeviceId);
                 OnPropertyChanged(nameof(HasDevices));
                 if (_selectedDevice == device)

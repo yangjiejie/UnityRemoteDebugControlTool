@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
@@ -131,8 +131,7 @@ namespace RemoteDebugServer.Services
 
                 var msg = MessageCodec.CreateMessage(MessageType.Command, "", "", cmd);
                 var data = MessageCodec.Encode(msg);
-                await session.Stream!.WriteAsync(data);
-                await session.Stream!.FlushAsync();
+                await session.SendAsync(data);
 
                 Log($"指令已发送 -> {session.Device?.DeviceName}: {command} [{cmd.CommandId[..8]}]");
                 return (true, cmd.CommandId);
@@ -162,8 +161,7 @@ namespace RemoteDebugServer.Services
                 };
                 var msg = MessageCodec.CreateMessage(MessageType.MockProtocol, "", "", data);
                 var bytes = MessageCodec.Encode(msg);
-                await session.Stream!.WriteAsync(bytes);
-                await session.Stream!.FlushAsync();
+                await session.SendAsync(bytes);
                 Log($"模拟协议已发送 -> {session.Device?.DeviceName}: msgId={msgId} ({protobufBytes.Length} 字节)");
                 return (true, "");
             }
@@ -194,8 +192,7 @@ namespace RemoteDebugServer.Services
 
                 var msg = MessageCodec.CreateMessage(MessageType.FileRequest, "", "", request);
                 var data = MessageCodec.Encode(msg);
-                await session.Stream!.WriteAsync(data);
-                await session.Stream!.FlushAsync();
+                await session.SendAsync(data);
 
                 Log($"文件请求已发送 -> {session.Device?.DeviceName}: {filePath}");
                 return true;
@@ -252,8 +249,7 @@ namespace RemoteDebugServer.Services
 
                 var msg = MessageCodec.CreateMessage(MessageType.FileTransfer, "", "", fileData);
                 var data = MessageCodec.Encode(msg);
-                await session.Stream!.WriteAsync(data);
-                await session.Stream!.FlushAsync();
+                await session.SendAsync(data);
 
                 return true;
             }
@@ -409,6 +405,7 @@ namespace RemoteDebugServer.Services
                         Log($"设备断开: {session.Device.DeviceName}");
                     }
                 }
+                session.VideoReceiver.Dispose();
                 session.Dispose();
             }
         }
@@ -443,6 +440,30 @@ namespace RemoteDebugServer.Services
 
                 case MessageType.FileTransfer:
                     await ProcessFileTransfer(device, msg);
+                    break;
+
+                case MessageType.VideoChunk:
+                    var chunk = msg.ParseData<VideoChunk>();
+                    if (chunk == null) break;
+                    try
+                    {
+                        string directory = GetDeviceFileDirectory(device, "video");
+                        string? path = await session.VideoReceiver.ReceiveAsync(chunk, directory);
+                        if (path != null)
+                        {
+                            await session.SendAsync(MessageCodec.Encode(MessageCodec.CreateMessage(MessageType.VideoTransferResult, "", "",
+                                new VideoTransferResult { TransferId = chunk.TransferId, Success = true })));
+                            OnFileReceived?.Invoke(device, path, "video");
+                            Log($"视频接收完成并通过校验: {path}");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        session.VideoReceiver.Dispose();
+                        await session.SendAsync(MessageCodec.Encode(MessageCodec.CreateMessage(MessageType.VideoTransferResult, "", "",
+                            new VideoTransferResult { TransferId = chunk.TransferId, Error = ex.Message })));
+                        throw new IOException("视频接收失败: " + ex.Message, ex);
+                    }
                     break;
 
                 case MessageType.UpdateDeviceInfo:
@@ -520,13 +541,7 @@ namespace RemoteDebugServer.Services
 
             try
             {
-                // 使用设备别名（左侧显示的主机名）作为接收目录，便于识别
-                string safeAlias = SanitizeFolderName(device.Alias);
-                string shortId = device.DeviceId.Length > 8 ? device.DeviceId[..8] : device.DeviceId;
-                string deviceFolder = string.IsNullOrWhiteSpace(safeAlias)
-                    ? shortId
-                    : $"{safeAlias}_{shortId}";
-                string deviceDir = Path.Combine(ReceivedFilesDirectory, deviceFolder, fileData.FileType);
+                string deviceDir = GetDeviceFileDirectory(device, fileData.FileType);
                 Directory.CreateDirectory(deviceDir);
 
                 // 直接使用原始文件名保存（同名文件重复接收时覆盖）
@@ -543,6 +558,17 @@ namespace RemoteDebugServer.Services
             {
                 Log($"保存文件失败: {ex.Message}");
             }
+        }
+
+        // 所有接收文件共用同一目录规则，视频与截图、日志归入同一个设备别名目录。
+        private string GetDeviceFileDirectory(ConnectedDevice device, string fileType)
+        {
+            string safeAlias = SanitizeFolderName(device.Alias);
+            string shortId = device.DeviceId.Length > 8 ? device.DeviceId[..8] : device.DeviceId;
+            string deviceFolder = string.IsNullOrWhiteSpace(safeAlias)
+                ? shortId
+                : $"{safeAlias}_{shortId}";
+            return Path.Combine(ReceivedFilesDirectory, deviceFolder, fileType);
         }
 
         private LogDisplayEntry CreateLogDisplayEntry(LogEntry log, string deviceName)
@@ -600,7 +626,7 @@ namespace RemoteDebugServer.Services
                 sb.Append(invalid.Contains(c) ? '_' : c);
             }
             string result = sb.ToString().Trim();
-            return string.IsNullOrWhiteSpace(result) ? "unknown" : result;
+            return string.IsNullOrWhiteSpace(result) || result == "." || result == ".." ? "unknown" : result;
         }
 
         #endregion
@@ -609,6 +635,14 @@ namespace RemoteDebugServer.Services
 
         private class ClientSession : IDisposable
         {
+            private readonly SemaphoreSlim _sendLock = new(1, 1);
+            public VideoTransferReceiver VideoReceiver { get; } = new();
+            public async Task SendAsync(byte[] data)
+            {
+                await _sendLock.WaitAsync();
+                try { await Stream!.WriteAsync(data); await Stream.FlushAsync(); }
+                finally { _sendLock.Release(); }
+            }
             public TcpClient TcpClient { get; }
             public NetworkStream? Stream { get; }
             public ConnectedDevice? Device { get; set; }
@@ -622,6 +656,7 @@ namespace RemoteDebugServer.Services
 
             public void Dispose()
             {
+                // ReceiveAsync is owned by the receive loop; cleanup occurs after its stream is closed.
                 try { Stream?.Close(); } catch { }
                 try { TcpClient?.Close(); } catch { }
             }

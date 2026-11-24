@@ -25,7 +25,7 @@
             <ComboBoxItem Content="日志 (log)" Tag="log" IsSelected="True"/>
             <ComboBoxItem Content="截图 (screenshot)" Tag="screenshot"/>
             <ComboBoxItem Content="缓存 (cache)" Tag="cache"/>
-            <ComboBoxItem Content="视频帧 (video_frame)" Tag="video_frame"/>
+            <ComboBoxItem Content="视频 (video)" Tag="video"/>
             <ComboBoxItem Content="其他 (other)" Tag="other"/>
         </ComboBox>
 
